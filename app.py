@@ -6,7 +6,7 @@ import streamlit as st
 from google import genai
 from google.genai import types
 
-# Fleximi i marrjes së API Key nga Streamlit Secrets ose Environment Variables
+# Leximi i API Key nga Streamlit Secrets ose Environment Variables
 api_key = st.secrets.get("GEMINI_API_KEY", os.environ.get("GEMINI_API_KEY", ""))
 
 st.set_page_config(
@@ -44,17 +44,20 @@ with col3:
     lang_choice = st.selectbox("報告語言", ["繁體中文 (Traditional Chinese)", "英文 (English)", "中英雙語對照 (Bilingual)"])
 
 def fetch_realtime_context(query):
-    encoded_query = urllib.parse.quote(query)
-    rss_url = f"https://news.google.com/rss/search?q={encoded_query}+OR+聯準會+OR+美債殖利率+OR+通膨&hl=zh-TW&gl=TW&ceid=TW:zh-Hant"
-    feed = feedparser.parse(rss_url)
-    
-    news_list = []
-    for entry in feed.entries[:5]: # Zvogëluar në 5 për të kursyer token
-        title = entry.get('title', '')
-        published = entry.get('published', '')
-        summary = entry.get('summary', '')[:80]
-        news_list.append(f"【時間: {published}】\n標題: {title}\n摘要: {summary}\n")
-    return "\n".join(news_list)
+    try:
+        encoded_query = urllib.parse.quote(query)
+        rss_url = f"https://news.google.com/rss/search?q={encoded_query}+OR+聯準會+OR+美債殖利率+OR+通膨&hl=zh-TW&gl=TW&ceid=TW:zh-Hant"
+        feed = feedparser.parse(rss_url)
+        
+        news_list = []
+        for entry in feed.entries[:5]:
+            title = entry.get('title', '')
+            published = entry.get('published', '')
+            summary = entry.get('summary', '')[:80]
+            news_list.append(f"【時間: {published}】\n標題: {title}\n摘要: {summary}\n")
+        return "\n".join(news_list)
+    except Exception as e:
+        return "無法取得即時新聞資料，將依據一般市場知識生成分析。"
 
 if st.button("🚀 生成分析報告", type="primary", use_container_width=True):
     if not api_key:
@@ -97,11 +100,12 @@ if st.button("🚀 生成分析報告", type="primary", use_container_width=True
 3. **專業度要求**：使用標準金融機構用語。
 """
 
-        # Lista e modeleve rezervë për të shmangur gabimet 503/429
-        models_to_try = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash']
+        # Përdorimi i modeleve zyrtare me qëndrueshmëri të lartë
+        models_to_try = ['gemini-1.5-flash', 'gemini-1.5-pro']
         report_text = None
+        last_error = ""
         
-        with st.spinner("🤖 AI 正在撰寫分析報告（並行嘗試多個模型）..."):
+        with st.spinner("🤖 AI 正在撰寫分析報告..."):
             for model_name in models_to_try:
                 for attempt in range(1, 4):
                     try:
@@ -112,10 +116,12 @@ if st.button("🚀 生成分析報告", type="primary", use_container_width=True
                                 automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True)
                             )
                         )
-                        report_text = response.text
-                        break
+                        if response and response.text:
+                            report_text = response.text
+                            break
                     except Exception as e:
-                        time.sleep(attempt * 4) # Pritje prej 4s, 8s, 12s
+                        last_error = str(e)
+                        time.sleep(attempt * 3) # Pritje 3s, 6s, 9s
                 
                 if report_text:
                     break
@@ -132,4 +138,5 @@ if st.button("🚀 生成分析報告", type="primary", use_container_width=True
                 mime="text/plain"
             )
         else:
-            st.error("❌ Google API 伺服器目前持續繁忙中，請稍候 30-60 sekonda dhe provoni përsëri.")
+            st.error(f"❌ 報告生成失敗。 Detajet e gabimit: {last_error}")
+            st.info("💡 Ju lutemi kontrolloni nëse API Key juaj është i saktë ose provoni përsëri pas pak sekondash.")
