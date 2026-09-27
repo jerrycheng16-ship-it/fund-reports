@@ -50,7 +50,7 @@ def fetch_realtime_context(query):
         feed = feedparser.parse(rss_url)
         
         news_list = []
-        for entry in feed.entries[:4]: # 控制抓取量以降低 Token 消耗
+        for entry in feed.entries[:4]: # 限制為 4 條，維持最精簡 Token 消耗
             title = entry.get('title', '')
             published = entry.get('published', '')
             summary = entry.get('summary', '')[:80]
@@ -103,32 +103,28 @@ if st.button("🚀 生成分析報告", type="primary", use_container_width=True
 3. **專業度要求**：使用標準金融機構用語（如：殖利率、基點 bps、折溢價、流動性溢價、久期 Duration、風險報酬比）。
 """
 
-        # 免費版 API 請鎖定高配額的 Flash 模型，避免觸發 429 配額不足
-        models_to_try = ['gemini-3.8-flash']
+        # 設定三個不同世代的模型作為備援輪詢
+        models_to_try = ['gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-3.8-flash']
         report_text = None
         last_error = ""
         
         with st.spinner("🤖 AI 正在撰寫分析報告..."):
             for model_name in models_to_try:
-                for attempt in range(1, 4):
-                    try:
-                        response = client.models.generate_content(
-                            model=model_name,
-                            contents=prompt,
-                            config=types.GenerateContentConfig(
-                                automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True)
-                            )
+                try:
+                    response = client.models.generate_content(
+                        model=model_name,
+                        contents=prompt,
+                        config=types.GenerateContentConfig(
+                            automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True)
                         )
-                        if response and response.text:
-                            report_text = response.text
-                            break
-                    except Exception as e:
-                        last_error = str(e)
-                        # 發生 429/503 時退避等待 8 秒、16 秒，讓免費配額冷卻
-                        time.sleep(attempt * 8)
-                
-                if report_text:
-                    break
+                    )
+                    if response and response.text:
+                        report_text = response.text
+                        break
+                except Exception as e:
+                    last_error = str(e)
+                    # 若遇到限流或配額滿，稍微等待 3 秒後自動切換至下一個模型試驗
+                    time.sleep(3)
 
         if report_text:
             st.markdown("---")
@@ -143,4 +139,4 @@ if st.button("🚀 生成分析報告", type="primary", use_container_width=True
             )
         else:
             st.error(f"❌ 報告生成失敗。錯誤細節：{last_error}")
-            st.info("💡 請稍候約 10~20 秒後再次點擊「生成分析報告」，給予免費版 API 冷卻時間。")
+            st.info("💡 目前 API 今日額度已滿或處於冷卻期，請稍等半分鐘後重試！")
