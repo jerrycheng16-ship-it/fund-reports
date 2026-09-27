@@ -15,8 +15,14 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-st.title("📊 AI 基金投資決策與即時分析報告生成器 (通義千問 Qwen 版)")
+st.title("📊 AI 基金投資決策與即時分析報告生成器")
 st.caption("根據最新實時總經數據、金融市場訊息與買賣方向，自動編譯機構級投資分析報告。")
+
+# 初始化 Session State（用來儲存生成好的報告與歷史資料）
+if "current_report" not in st.session_state:
+    st.session_state.current_report = None
+if "last_prompt_info" not in st.session_state:
+    st.session_state.last_prompt_info = {}
 
 with st.sidebar:
     st.header("⚙️ 系統設定")
@@ -58,30 +64,46 @@ def fetch_realtime_context(query):
     except Exception as e:
         return "無法取得即時新聞資料，將依據一般市場知識生成分析。"
 
-if st.button("🚀 生成分析報告", type="primary", use_container_width=True):
+# 核心 API 呼叫函數
+def generate_qwen_response(messages_list):
+    client = OpenAI(
+        api_key=api_key.strip(),
+        base_url="https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
+    )
+    models_to_try = ['qwen-max', 'qwen-plus', 'qwen-turbo']
+    last_error = ""
+    
+    for model_name in models_to_try:
+        try:
+            response = client.chat.completions.create(
+                model=model_name,
+                messages=messages_list,
+                temperature=0.7
+            )
+            if response and response.choices:
+                return response.choices[0].message.content, None
+        except Exception as e:
+            last_error = str(e)
+            time.sleep(2)
+    return None, last_error
+
+# 1. 首次生成報告按鈕
+if st.button("🚀 生成初始分析報告", type="primary", use_container_width=True):
     if not api_key:
-        st.error("❌ 請先在 Streamlit Community Cloud 的 Secrets 中設定 DASHSCOPE_API_KEY！")
+        st.error("❌ 請先在 Streamlit Secrets 中設定 DASHSCOPE_API_KEY！")
     elif not fund_name:
         st.warning("⚠️ 請輸入基金名稱或代碼！")
     else:
-        with st.spinner("正在爬取全球實時金融數據與市場新聞..."):
+        with st.spinner("正在爬取實時金融數據並撰寫研報..."):
             market_data = fetch_realtime_context(fund_name)
-        
-        st.success("✅ 已取得最新市場訊息！正在進行總經歸因與策略推理...")
-        
-        # 初始化阿里雲 DashScope 客戶端 (國際站端點)
-        client = OpenAI(
-            api_key=api_key.strip(),
-            base_url="https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
-        )
-        
-        lang_instruction = "全篇報告請使用「標準繁體中文」。"
-        if lang_choice == "英文 (English)":
-            lang_instruction = "Please write the entire report in Professional English."
-        elif lang_choice == "中英雙語對照 (Bilingual)":
-            lang_instruction = "每個段落請先提供「繁體中文」，隨後附上對應的「英文翻譯 (English Translation)」。"
+            
+            lang_instruction = "全篇報告請使用「標準繁體中文」。"
+            if lang_choice == "英文 (English)":
+                lang_instruction = "Please write the entire report in Professional English."
+            elif lang_choice == "中英雙語對照 (Bilingual)":
+                lang_instruction = "每個段落請先提供「繁體中文」，隨後附上對應的「英文翻譯 (English Translation)」。"
 
-        prompt = f"""
+            prompt = f"""
 你是一位機構級的首席投資策略官與資深資產配置分析師。
 
 請針對使用者欲進行的交易規劃，結合最新的實時金融市場與總經數據，撰寫一份機構級的《基金投資分析與決策評估報告》。
@@ -105,39 +127,60 @@ if st.button("🚀 生成分析報告", type="primary", use_container_width=True
      針對使用者選擇的「{action_type}」方向進行客觀可行性評估，給出具體的投資進場/出場時機建議、評價點位考量及避險與停損/停利策略。
 3. **專業度要求**：使用標準金融機構用語（如：殖利率、基點 bps、折溢價、流動性溢價、久期 Duration、風險報酬比）。
 """
-
-        # 設定 Qwen 模型輪詢（優先使用旗艦級 qwen-max，備用 qwen-plus / qwen-turbo）
-        models_to_try = ['qwen-max', 'qwen-plus', 'qwen-turbo']
-        report_text = None
-        last_error = ""
-        
-        with st.spinner("🤖 通義千問 Qwen 正在撰寫分析報告..."):
-            for model_name in models_to_try:
-                try:
-                    response = client.chat.completions.create(
-                        model=model_name,
-                        messages=[
-                            {"role": "user", "content": prompt}
-                        ],
-                        temperature=0.7
-                    )
-                    if response and response.choices:
-                        report_text = response.choices[0].message.content
-                        break
-                except Exception as e:
-                    last_error = str(e)
-                    time.sleep(2)
-
-        if report_text:
-            st.markdown("---")
-            st.subheader(f"📈 《{fund_name}》- {action_type} 決策分析報告")
-            st.markdown(report_text)
+            messages = [{"role": "user", "content": prompt}]
+            report, err = generate_qwen_response(messages)
             
-            st.download_button(
-                label="📥 下載投資報告 (TXT)",
-                data=report_text,
-                file_name=f"{fund_name}_{action_type}_Report.txt",
-                mime="text/plain"
-            )
+            if report:
+                st.session_state.current_report = report
+                st.session_state.last_prompt_info = {
+                    "fund_name": fund_name,
+                    "action_type": action_type,
+                    "prompt": prompt
+                }
+            else:
+                st.error(f"❌ 報告生成失敗：{err}")
+
+# 2. 顯示現有報告與二次微調區塊
+if st.session_state.current_report:
+    st.markdown("---")
+    st.subheader(f"📈 《{st.session_state.last_prompt_info.get('fund_name')}》- {st.session_state.last_prompt_info.get('action_type')} 決策分析報告")
+    st.markdown(st.session_state.current_report)
+    
+    st.download_button(
+        label="📥 下載當前投資報告 (TXT)",
+        data=st.session_state.current_report,
+        file_name=f"{st.session_state.last_prompt_info.get('fund_name')}_{st.session_state.last_prompt_info.get('action_type')}_Report.txt",
+        mime="text/plain"
+    )
+
+    # -------------------------------------------------------------
+    # 💡 關鍵功能：針對回應進行調整並重新生成
+    # -------------------------------------------------------------
+    st.markdown("---")
+    st.subheader("🔄 報告優化與微調 (Feedback & Regenerate)")
+    st.caption("您可以輸入對這份報告的修改建議，AI 將根據您的意見重新編譯報告。")
+    
+    user_feedback = st.text_area(
+        "輸入您的修改需求或補充意見：",
+        placeholder="例如：請增加關於信評變化的討論、將第三段的停損策略調整得更保守一點、或補充說明殖利率倒掛對久期的影響..."
+    )
+    
+    if st.button("✏️ 根據意見重新修正報告", type="secondary"):
+        if not user_feedback.strip():
+            st.warning("⚠️ 請先輸入修改意見！")
         else:
-            st.error(f"❌ 報告生成失敗。錯誤細節：{last_error}")
+            with st.spinner("🤖 AI 正在根據您的意見重新調校與編譯報告..."):
+                # 將「歷史報告」與「使用者修改意見」包裝進 Prompt 重新傳給 AI
+                refine_messages = [
+                    {"role": "user", "content": st.session_state.last_prompt_info.get("prompt")},
+                    {"role": "assistant", "content": st.session_state.current_report},
+                    {"role": "user", "content": f"請根據以下意見修改上面的報告，並保持整體約 900 字的三段式機構研報結構：\n\n【修改意見】：{user_feedback}"}
+                ]
+                
+                updated_report, err = generate_qwen_response(refine_messages)
+                if updated_report:
+                    st.session_state.current_report = updated_report
+                    st.success("✅ 報告已更新！")
+                    st.rerun() # 重新整理頁面顯示最新報告
+                else:
+                    st.error(f"❌ 修正失敗：{err}")
