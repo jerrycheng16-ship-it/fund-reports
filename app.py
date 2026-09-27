@@ -3,10 +3,10 @@ import time
 import urllib.parse
 import feedparser
 import streamlit as st
-import anthropic
+from openai import OpenAI
 
-# 從 Streamlit Secrets 或環境變數讀取 Claude API Key
-api_key = st.secrets.get("ANTHROPIC_API_KEY", os.environ.get("ANTHROPIC_API_KEY", ""))
+# 從 Streamlit Secrets 或環境變數讀取 DashScope (Qwen) API Key
+api_key = st.secrets.get("DASHSCOPE_API_KEY", os.environ.get("DASHSCOPE_API_KEY", ""))
 
 st.set_page_config(
     page_title="AI 基金投資決策與分析報告生成器",
@@ -15,15 +15,15 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-st.title("📊 AI 基金投資決策與即時分析報告生成器 (Claude 版)")
+st.title("📊 AI 基金投資決策與即時分析報告生成器 (通義千問 Qwen 版)")
 st.caption("根據最新實時總經數據、金融市場訊息與買賣方向，自動編譯機構級投資分析報告。")
 
 with st.sidebar:
     st.header("⚙️ 系統設定")
     if api_key:
-        st.success("✅ 已自動載入 Claude API Key")
+        st.success("✅ 已自動載入 DashScope API Key")
     else:
-        st.error("❌ 未偵測到 API Key，請至 Streamlit Secrets 設定 ANTHROPIC_API_KEY")
+        st.error("❌ 未偵測到 API Key，請至 Streamlit Secrets 設定 DASHSCOPE_API_KEY")
     
     st.markdown("---")
     st.markdown("### 📌 報告規格")
@@ -60,7 +60,7 @@ def fetch_realtime_context(query):
 
 if st.button("🚀 生成分析報告", type="primary", use_container_width=True):
     if not api_key:
-        st.error("❌ 請先在 Streamlit Community Cloud 的 Secrets 中設定 ANTHROPIC_API_KEY！")
+        st.error("❌ 請先在 Streamlit Community Cloud 的 Secrets 中設定 DASHSCOPE_API_KEY！")
     elif not fund_name:
         st.warning("⚠️ 請輸入基金名稱或代碼！")
     else:
@@ -69,7 +69,11 @@ if st.button("🚀 生成分析報告", type="primary", use_container_width=True
         
         st.success("✅ 已取得最新市場訊息！正在進行總經歸因與策略推理...")
         
-        client = anthropic.Anthropic(api_key=api_key.strip())
+        # 初始化阿里雲 DashScope 客戶端 (國際站端點)
+        client = OpenAI(
+            api_key=api_key.strip(),
+            base_url="https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
+        )
         
         lang_instruction = "全篇報告請使用「標準繁體中文」。"
         if lang_choice == "英文 (English)":
@@ -102,23 +106,23 @@ if st.button("🚀 生成分析報告", type="primary", use_container_width=True
 3. **專業度要求**：使用標準金融機構用語（如：殖利率、基點 bps、折溢價、流動性溢價、久期 Duration、風險報酬比）。
 """
 
-        # 設定 Claude 模型備援機制（優先使用 Claude 3.5 Sonnet，備用 Claude 3 Haiku）
-        models_to_try = ['claude-3-5-sonnet-20241022', 'claude-3-haiku-20240307']
+        # 設定 Qwen 模型輪詢（優先使用旗艦級 qwen-max，備用 qwen-plus / qwen-turbo）
+        models_to_try = ['qwen-max', 'qwen-plus', 'qwen-turbo']
         report_text = None
         last_error = ""
         
-        with st.spinner("🤖 Claude 正在撰寫分析報告..."):
+        with st.spinner("🤖 通義千問 Qwen 正在撰寫分析報告..."):
             for model_name in models_to_try:
                 try:
-                    response = client.messages.create(
+                    response = client.chat.completions.create(
                         model=model_name,
-                        max_tokens=2000,
                         messages=[
                             {"role": "user", "content": prompt}
-                        ]
+                        ],
+                        temperature=0.7
                     )
-                    if response and response.content:
-                        report_text = response.content[0].text
+                    if response and response.choices:
+                        report_text = response.choices[0].message.content
                         break
                 except Exception as e:
                     last_error = str(e)
