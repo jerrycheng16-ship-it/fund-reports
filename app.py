@@ -3,11 +3,10 @@ import time
 import urllib.parse
 import feedparser
 import streamlit as st
-from google import genai
-from google.genai import types
+import anthropic
 
-# 從 Streamlit Secrets 或環境變數讀取 API Key
-api_key = st.secrets.get("GEMINI_API_KEY", os.environ.get("GEMINI_API_KEY", ""))
+# 從 Streamlit Secrets 或環境變數讀取 Claude API Key
+api_key = st.secrets.get("ANTHROPIC_API_KEY", os.environ.get("ANTHROPIC_API_KEY", ""))
 
 st.set_page_config(
     page_title="AI 基金投資決策與分析報告生成器",
@@ -16,15 +15,15 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-st.title("📊 AI 基金投資決策與即時分析報告生成器")
+st.title("📊 AI 基金投資決策與即時分析報告生成器 (Claude 版)")
 st.caption("根據最新實時總經數據、金融市場訊息與買賣方向，自動編譯機構級投資分析報告。")
 
 with st.sidebar:
     st.header("⚙️ 系統設定")
     if api_key:
-        st.success("✅ 已自動載入 Gemini API Key")
+        st.success("✅ 已自動載入 Claude API Key")
     else:
-        st.error("❌ 未偵測到 API Key，請至 Streamlit Secrets 設定 GEMINI_API_KEY")
+        st.error("❌ 未偵測到 API Key，請至 Streamlit Secrets 設定 ANTHROPIC_API_KEY")
     
     st.markdown("---")
     st.markdown("### 📌 報告規格")
@@ -50,10 +49,10 @@ def fetch_realtime_context(query):
         feed = feedparser.parse(rss_url)
         
         news_list = []
-        for entry in feed.entries[:4]: # 限制為 4 條，維持最精簡 Token 消耗
+        for entry in feed.entries[:5]:
             title = entry.get('title', '')
             published = entry.get('published', '')
-            summary = entry.get('summary', '')[:80]
+            summary = entry.get('summary', '')[:100]
             news_list.append(f"【時間: {published}】\n標題: {title}\n摘要: {summary}\n")
         return "\n".join(news_list)
     except Exception as e:
@@ -61,7 +60,7 @@ def fetch_realtime_context(query):
 
 if st.button("🚀 生成分析報告", type="primary", use_container_width=True):
     if not api_key:
-        st.error("❌ 請先在 Streamlit Community Cloud 的 Secrets 中設定 GEMINI_API_KEY！")
+        st.error("❌ 請先在 Streamlit Community Cloud 的 Secrets 中設定 ANTHROPIC_API_KEY！")
     elif not fund_name:
         st.warning("⚠️ 請輸入基金名稱或代碼！")
     else:
@@ -70,7 +69,7 @@ if st.button("🚀 生成分析報告", type="primary", use_container_width=True
         
         st.success("✅ 已取得最新市場訊息！正在進行總經歸因與策略推理...")
         
-        client = genai.Client(api_key=api_key.strip())
+        client = anthropic.Anthropic(api_key=api_key.strip())
         
         lang_instruction = "全篇報告請使用「標準繁體中文」。"
         if lang_choice == "英文 (English)":
@@ -103,28 +102,27 @@ if st.button("🚀 生成分析報告", type="primary", use_container_width=True
 3. **專業度要求**：使用標準金融機構用語（如：殖利率、基點 bps、折溢價、流動性溢價、久期 Duration、風險報酬比）。
 """
 
-        # 設定三個不同世代的模型作為備援輪詢
-        models_to_try = ['gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-3.8-flash']
+        # 設定 Claude 模型備援機制（優先使用 Claude 3.5 Sonnet，備用 Claude 3 Haiku）
+        models_to_try = ['claude-3-5-sonnet-20241022', 'claude-3-haiku-20240307']
         report_text = None
         last_error = ""
         
-        with st.spinner("🤖 AI 正在撰寫分析報告..."):
+        with st.spinner("🤖 Claude 正在撰寫分析報告..."):
             for model_name in models_to_try:
                 try:
-                    response = client.models.generate_content(
+                    response = client.messages.create(
                         model=model_name,
-                        contents=prompt,
-                        config=types.GenerateContentConfig(
-                            automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True)
-                        )
+                        max_tokens=2000,
+                        messages=[
+                            {"role": "user", "content": prompt}
+                        ]
                     )
-                    if response and response.text:
-                        report_text = response.text
+                    if response and response.content:
+                        report_text = response.content[0].text
                         break
                 except Exception as e:
                     last_error = str(e)
-                    # 若遇到限流或配額滿，稍微等待 3 秒後自動切換至下一個模型試驗
-                    time.sleep(3)
+                    time.sleep(2)
 
         if report_text:
             st.markdown("---")
@@ -139,4 +137,3 @@ if st.button("🚀 生成分析報告", type="primary", use_container_width=True
             )
         else:
             st.error(f"❌ 報告生成失敗。錯誤細節：{last_error}")
-            st.info("💡 目前 API 今日額度已滿或處於冷卻期，請稍等半分鐘後重試！")
