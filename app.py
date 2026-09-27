@@ -6,6 +6,11 @@ import streamlit as st
 from google import genai
 from google.genai import types
 
+# -------------------------------------------------------------
+# 🔒 在此處直接寫死你的 Gemini API Key
+# -------------------------------------------------------------
+HARDCODED_API_KEY = "將你的 API Key 貼在這裡（以 AIzaSy 開頭）"
+
 # 1. 頁面基本設定
 st.set_page_config(
     page_title="AI 基金投資決策與分析報告生成器",
@@ -17,11 +22,10 @@ st.set_page_config(
 st.title("📊 AI 基金投資決策與即時分析報告生成器")
 st.caption("根據最新實時總經數據、金融市場訊息與買賣方向，自動編譯機構級投資分析報告。")
 
-# 側邊欄：API Key 設定
+# 側邊欄：說明區
 with st.sidebar:
     st.header("⚙️ 系統設定")
-    api_key_input = st.text_input("輸入 Gemini API Key", type="password", help="可在此輸入，或於 Streamlit Secrets 設定 GEMINI_API_KEY")
-    api_key = api_key_input if api_key_input else os.environ.get("GEMINI_API_KEY", "")
+    st.success("✅ API Key 已完成硬編碼（免手動輸入）")
     
     st.markdown("---")
     st.markdown("### 📌 報告規格")
@@ -48,7 +52,7 @@ def fetch_realtime_context(query):
     feed = feedparser.parse(rss_url)
     
     news_list = []
-    for entry in feed.entries[:6]: # 精簡至 6 條，避免 Token 消耗過多
+    for entry in feed.entries[:6]:
         title = entry.get('title', '')
         published = entry.get('published', '')
         summary = entry.get('summary', '')[:100]
@@ -57,8 +61,10 @@ def fetch_realtime_context(query):
 
 # 3. 生成報告按鈕邏輯
 if st.button("🚀 生成分析報告", type="primary", use_container_width=True):
-    if not api_key:
-        st.error("❌ 請先提供 Gemini API Key！")
+    api_key = HARDCODED_API_KEY.strip()
+    
+    if not api_key or api_key == "將你的 API Key 貼在這裡（以 AIzaSy 開頭）":
+        st.error("❌ 請先在 app.py 的 HARDCODED_API_KEY 變數中填入真實的 Gemini API Key！")
     elif not fund_name:
         st.warning("⚠️ 請輸入基金名稱或代碼！")
     else:
@@ -67,8 +73,7 @@ if st.button("🚀 生成分析報告", type="primary", use_container_width=True
         
         st.success("✅ 已取得最新市場訊息！正在進行總經歸因與策略推理...")
         
-        # 建立 Gemini Client
-        client = genai.Client(api_key=api_key.strip())
+        client = genai.Client(api_key=api_key)
         
         # 語言指示
         lang_instruction = "全篇報告請使用「標準繁體中文」。"
@@ -102,13 +107,13 @@ if st.button("🚀 生成分析報告", type="primary", use_container_width=True
 3. **專業度要求**：使用標準金融機構用語（如：殖利率、基點 bps、折溢價、流動性溢價、久期 Duration、風險報酬比）。
 """
 
-        # 4. 呼叫 API：加入多模型備用機制與 503/429 重試邏輯
+        # 4. 呼叫 API (多模型備用 + 重試邏輯)
         models_to_try = ['gemini-3.8-flash', 'gemini-2.5-flash']
         report_text = None
         
         with st.spinner("🤖 AI 正在撰寫 900 字分析報告（若遇伺服器繁忙將自動重試）..."):
             for model_name in models_to_try:
-                for attempt in range(1, 4): # 每個模型重試最多 3 次
+                for attempt in range(1, 4):
                     try:
                         response = client.models.generate_content(
                             model=model_name,
@@ -120,7 +125,7 @@ if st.button("🚀 生成分析報告", type="primary", use_container_width=True
                         report_text = response.text
                         break
                     except Exception as e:
-                        wait_time = attempt * 5 # 遇到 503 時，遞增等待 5s, 10s
+                        wait_time = attempt * 5
                         time.sleep(wait_time)
                 
                 if report_text:
@@ -131,7 +136,6 @@ if st.button("🚀 生成分析報告", type="primary", use_container_width=True
             st.subheader(f"📈 《{fund_name}》- {action_type} 決策分析報告")
             st.markdown(report_text)
             
-            # 提供下載功能
             st.download_button(
                 label="📥 下載投資報告 (TXT)",
                 data=report_text,
