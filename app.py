@@ -103,8 +103,8 @@ if st.button("🚀 生成分析報告", type="primary", use_container_width=True
 3. **專業度要求**：使用標準金融機構用語（如：殖利率、基點 bps、折溢價、流動性溢價、久期 Duration、風險報酬比）。
 """
 
-        # 替換為 Google 新 SDK 支援的標準模型名稱
-        models_to_try = ['gemini-2.5-flash', 'gemini-2.5-pro']
+        # 更新為最新的 Google Gemini API 官方模型名稱
+        models_to_try = ['gemini-3.8-flash', 'gemini-3.1-pro-preview']
         report_text = None
         last_error = ""
         
@@ -124,7 +124,7 @@ if st.button("🚀 生成分析報告", type="primary", use_container_width=True
                             break
                     except Exception as e:
                         last_error = str(e)
-                        time.sleep(attempt * 3)
+                        time.sleep(attempt * 4) # 退避等待 4s, 8s, 12s
                 
                 if report_text:
                     break
