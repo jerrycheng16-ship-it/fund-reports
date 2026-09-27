@@ -6,12 +6,9 @@ import streamlit as st
 from google import genai
 from google.genai import types
 
-# -------------------------------------------------------------
-# 🔒 從環境變數或 Streamlit Secrets 自動讀取 API Key
-# -------------------------------------------------------------
+# Fleximi i marrjes së API Key nga Streamlit Secrets ose Environment Variables
 api_key = st.secrets.get("GEMINI_API_KEY", os.environ.get("GEMINI_API_KEY", ""))
 
-# 1. 頁面基本設定
 st.set_page_config(
     page_title="AI 基金投資決策與分析報告生成器",
     page_icon="📊",
@@ -22,7 +19,6 @@ st.set_page_config(
 st.title("📊 AI 基金投資決策與即時分析報告生成器")
 st.caption("根據最新實時總經數據、金融市場訊息與買賣方向，自動編譯機構級投資分析報告。")
 
-# 側邊欄：說明區
 with st.sidebar:
     st.header("⚙️ 系統設定")
     if api_key:
@@ -36,7 +32,6 @@ with st.sidebar:
     st.markdown("- **架構**：三大核心章節")
     st.markdown("- **語系**：中英雙語/單語可選")
 
-# 主介面輸入表單
 col1, col2, col3 = st.columns([2, 1, 1])
 
 with col1:
@@ -48,21 +43,19 @@ with col2:
 with col3:
     lang_choice = st.selectbox("報告語言", ["繁體中文 (Traditional Chinese)", "英文 (English)", "中英雙語對照 (Bilingual)"])
 
-# 2. RSS 即時財經資料抓取函數
 def fetch_realtime_context(query):
     encoded_query = urllib.parse.quote(query)
     rss_url = f"https://news.google.com/rss/search?q={encoded_query}+OR+聯準會+OR+美債殖利率+OR+通膨&hl=zh-TW&gl=TW&ceid=TW:zh-Hant"
     feed = feedparser.parse(rss_url)
     
     news_list = []
-    for entry in feed.entries[:6]:
+    for entry in feed.entries[:5]: # Zvogëluar në 5 për të kursyer token
         title = entry.get('title', '')
         published = entry.get('published', '')
-        summary = entry.get('summary', '')[:100]
+        summary = entry.get('summary', '')[:80]
         news_list.append(f"【時間: {published}】\n標題: {title}\n摘要: {summary}\n")
     return "\n".join(news_list)
 
-# 3. 生成報告按鈕邏輯
 if st.button("🚀 生成分析報告", type="primary", use_container_width=True):
     if not api_key:
         st.error("❌ 請先在 Streamlit Community Cloud 的 Secrets 中設定 GEMINI_API_KEY！")
@@ -76,7 +69,6 @@ if st.button("🚀 生成分析報告", type="primary", use_container_width=True
         
         client = genai.Client(api_key=api_key.strip())
         
-        # 語言指示
         lang_instruction = "全篇報告請使用「標準繁體中文」。"
         if lang_choice == "英文 (English)":
             lang_instruction = "Please write the entire report in Professional English."
@@ -100,19 +92,16 @@ if st.button("🚀 生成分析報告", type="primary", use_container_width=True
 1. **文章總長度**：請控制在 900 字左右（約 850 - 950 字）。
 2. **報告結構**（必須明確分為三大段，每段約 300 字）：
    - **第一段：當前總體經濟環境與市場脈絡分析**
-     解析最新通膨（CPI/PCE）、聯準會與主要央行利率政策、美債殖利率曲線動向及市場整體風險偏好（Risk-on / Risk-off）。
    - **第二段：基金標的屬性與最新衝擊評估**
-     剖析該基金（{fund_name}）的主要持股/持債屬性，評估當前市場訊息對該資產類別產生的正面與負面衝擊。
    - **第三段：買賣方向（{action_type}）可行性評估與風控建議**
-     針對使用者選擇的「{action_type}」方向進行客觀可行性評估，給出具體的投資進場/出場時機建議、評價點位考量及避險與停損/停利策略。
-3. **專業度要求**：使用標準金融機構用語（如：殖利率、基點 bps、折溢價、流動性溢價、久期 Duration、風險報酬比）。
+3. **專業度要求**：使用標準金融機構用語。
 """
 
-        # 4. 呼叫 API (多模型備用 + 重試邏輯)
-        models_to_try = ['gemini-3.8-flash', 'gemini-2.5-flash']
+        # Lista e modeleve rezervë për të shmangur gabimet 503/429
+        models_to_try = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash']
         report_text = None
         
-        with st.spinner("🤖 AI 正在撰寫 900 字分析報告（若遇伺服器繁忙將自動重試）..."):
+        with st.spinner("🤖 AI 正在撰寫分析報告（並行嘗試多個模型）..."):
             for model_name in models_to_try:
                 for attempt in range(1, 4):
                     try:
@@ -126,8 +115,7 @@ if st.button("🚀 生成分析報告", type="primary", use_container_width=True
                         report_text = response.text
                         break
                     except Exception as e:
-                        wait_time = attempt * 5
-                        time.sleep(wait_time)
+                        time.sleep(attempt * 4) # Pritje prej 4s, 8s, 12s
                 
                 if report_text:
                     break
@@ -144,4 +132,4 @@ if st.button("🚀 生成分析報告", type="primary", use_container_width=True
                 mime="text/plain"
             )
         else:
-            st.error("❌ Google API 伺服器目前持續繁忙中，請稍等半分鐘後重新點擊「生成分析報告」！")
+            st.error("❌ Google API 伺服器目前持續繁忙中，請稍候 30-60 sekonda dhe provoni përsëri.")
