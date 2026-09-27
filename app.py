@@ -7,7 +7,7 @@ from google import genai
 from google.genai import types
 
 # -------------------------------------------------------------
-# 🔒 在此處直接寫死你的 Gemini API Key
+# 🔒AQ.Ab8RN6IfJbSFYSzr-BKcGjZaGxHcItqX03dtHhsRwZ9lhH4b6AGemini API Key
 # -------------------------------------------------------------
 HARDCODED_API_KEY = "將你的 API Key 貼在這裡（以 AIzaSy 開頭）"
 
