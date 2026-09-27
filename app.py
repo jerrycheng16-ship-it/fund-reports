@@ -6,7 +6,7 @@ import streamlit as st
 from google import genai
 from google.genai import types
 
-# Leximi i API Key nga Streamlit Secrets ose Environment Variables
+# 從 Streamlit Secrets 或環境變數讀取 API Key
 api_key = st.secrets.get("GEMINI_API_KEY", os.environ.get("GEMINI_API_KEY", ""))
 
 st.set_page_config(
@@ -93,15 +93,18 @@ if st.button("🚀 生成分析報告", type="primary", use_container_width=True
 
 【報告撰寫嚴格規範】：
 1. **文章總長度**：請控制在 900 字左右（約 850 - 950 字）。
-2. **報告結構**（必須明確分為三大段，每段約 300 字）：
+2. **報告結構**（嚴格分為三大段，每段約 300 字）：
    - **第一段：當前總體經濟環境與市場脈絡分析**
+     解析最新通膨（CPI/PCE）、聯準會與主要央行利率政策、美債殖利率曲線動向及市場整體風險偏好（Risk-on / Risk-off）。
    - **第二段：基金標的屬性與最新衝擊評估**
+     剖析該基金（{fund_name}）的主要持股/持債屬性，評估當前市場訊息對該資產類別產生的正面與負面衝擊。
    - **第三段：買賣方向（{action_type}）可行性評估與風控建議**
-3. **專業度要求**：使用標準金融機構用語。
+     針對使用者選擇的「{action_type}」方向進行客觀可行性評估，給出具體的投資進場/出場時機建議、評價點位考量及避險與停損/停利策略。
+3. **專業度要求**：使用標準金融機構用語（如：殖利率、基點 bps、折溢價、流動性溢價、久期 Duration、風險報酬比）。
 """
 
-        # Përdorimi i modeleve zyrtare me qëndrueshmëri të lartë
-        models_to_try = ['gemini-1.5-flash', 'gemini-1.5-pro']
+        # 替換為 Google 新 SDK 支援的標準模型名稱
+        models_to_try = ['gemini-2.5-flash', 'gemini-2.5-pro']
         report_text = None
         last_error = ""
         
@@ -121,7 +124,7 @@ if st.button("🚀 生成分析報告", type="primary", use_container_width=True
                             break
                     except Exception as e:
                         last_error = str(e)
-                        time.sleep(attempt * 3) # Pritje 3s, 6s, 9s
+                        time.sleep(attempt * 3)
                 
                 if report_text:
                     break
@@ -138,5 +141,5 @@ if st.button("🚀 生成分析報告", type="primary", use_container_width=True
                 mime="text/plain"
             )
         else:
-            st.error(f"❌ 報告生成失敗。 Detajet e gabimit: {last_error}")
-            st.info("💡 Ju lutemi kontrolloni nëse API Key juaj është i saktë ose provoni përsëri pas pak sekondash.")
+            st.error(f"❌ 報告生成失敗。錯誤細節：{last_error}")
+            st.info("💡 請檢查 API Key 是否正確，或稍後再試。")
