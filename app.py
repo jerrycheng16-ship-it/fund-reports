@@ -7,9 +7,9 @@ from google import genai
 from google.genai import types
 
 # -------------------------------------------------------------
-# 🔒AQ.Ab8RN6IfJbSFYSzr-BKcGjZaGxHcItqX03dtHhsRwZ9lhH4b6AGemini API Key
+# 🔒 從環境變數或 Streamlit Secrets 自動讀取 API Key
 # -------------------------------------------------------------
-HARDCODED_API_KEY = "將你的 API Key 貼在這裡（以 AIzaSy 開頭）"
+api_key = st.secrets.get("GEMINI_API_KEY", os.environ.get("GEMINI_API_KEY", ""))
 
 # 1. 頁面基本設定
 st.set_page_config(
@@ -25,7 +25,10 @@ st.caption("根據最新實時總經數據、金融市場訊息與買賣方向�
 # 側邊欄：說明區
 with st.sidebar:
     st.header("⚙️ 系統設定")
-    st.success("✅ API Key 已完成硬編碼（免手動輸入）")
+    if api_key:
+        st.success("✅ 已自動載入 Gemini API Key")
+    else:
+        st.error("❌ 未偵測到 API Key，請至 Streamlit Secrets 設定 GEMINI_API_KEY")
     
     st.markdown("---")
     st.markdown("### 📌 報告規格")
@@ -61,10 +64,8 @@ def fetch_realtime_context(query):
 
 # 3. 生成報告按鈕邏輯
 if st.button("🚀 生成分析報告", type="primary", use_container_width=True):
-    api_key = HARDCODED_API_KEY.strip()
-    
-    if not api_key or api_key == "將你的 API Key 貼在這裡（以 AIzaSy 開頭）":
-        st.error("❌ 請先在 app.py 的 HARDCODED_API_KEY 變數中填入真實的 Gemini API Key！")
+    if not api_key:
+        st.error("❌ 請先在 Streamlit Community Cloud 的 Secrets 中設定 GEMINI_API_KEY！")
     elif not fund_name:
         st.warning("⚠️ 請輸入基金名稱或代碼！")
     else:
@@ -73,7 +74,7 @@ if st.button("🚀 生成分析報告", type="primary", use_container_width=True
         
         st.success("✅ 已取得最新市場訊息！正在進行總經歸因與策略推理...")
         
-        client = genai.Client(api_key=api_key)
+        client = genai.Client(api_key=api_key.strip())
         
         # 語言指示
         lang_instruction = "全篇報告請使用「標準繁體中文」。"
