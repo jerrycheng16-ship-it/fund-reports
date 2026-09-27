@@ -20,7 +20,7 @@ st.caption("根據最新實時總經數據、金融市場訊息與買賣方向�
 # 側邊欄：API Key 設定
 with st.sidebar:
     st.header("⚙️ 系統設定")
-    api_key_input = st.text_input("輸入 Gemini API Key", type="password", help="可以從 GitHub Secrets 或是在此輸入")
+    api_key_input = st.text_input("輸入 Gemini API Key", type="password", help="可在此輸入，或於 Streamlit Secrets 設定 GEMINI_API_KEY")
     api_key = api_key_input if api_key_input else os.environ.get("GEMINI_API_KEY", "")
     
     st.markdown("---")
@@ -33,7 +33,7 @@ with st.sidebar:
 col1, col2, col3 = st.columns([2, 1, 1])
 
 with col1:
-    fund_name = st.text_input("輸入基金名稱或代碼", placeholder="例如：安聯收益成長基金、0050、美國科技股 ETF")
+    fund_name = st.text_input("輸入基金名稱或代碼", placeholder="例如：IEF ETF、0050、安聯收益成長基金")
 
 with col2:
     action_type = st.selectbox("買賣方向", ["買進 / 建倉 (Buy)", "賣出 / 減碼 (Sell)", "觀望 / 持有 (Hold)"])
@@ -48,10 +48,10 @@ def fetch_realtime_context(query):
     feed = feedparser.parse(rss_url)
     
     news_list = []
-    for entry in feed.entries[:8]:
+    for entry in feed.entries[:6]: # 精簡至 6 條，避免 Token 消耗過多
         title = entry.get('title', '')
         published = entry.get('published', '')
-        summary = entry.get('summary', '')[:120]
+        summary = entry.get('summary', '')[:100]
         news_list.append(f"【時間: {published}】\n標題: {title}\n摘要: {summary}\n")
     return "\n".join(news_list)
 
@@ -90,7 +90,7 @@ if st.button("🚀 生成分析報告", type="primary", use_container_width=True
 【最新實時市場數據與新聞脈絡】：
 {market_data}
 
-【報告撰写嚴格規範】：
+【報告撰寫嚴格規範】：
 1. **文章總長度**：請控制在 900 字左右（約 850 - 950 字）。
 2. **報告結構**（必須明確分為三大段，每段約 300 字）：
    - **第一段：當前總體經濟環境與市場脈絡分析**
@@ -102,19 +102,31 @@ if st.button("🚀 生成分析報告", type="primary", use_container_width=True
 3. **專業度要求**：使用標準金融機構用語（如：殖利率、基點 bps、折溢價、流動性溢價、久期 Duration、風險報酬比）。
 """
 
-        report_place = st.empty()
+        # 4. 呼叫 API：加入多模型備用機制與 503/429 重試邏輯
+        models_to_try = ['gemini-3.8-flash', 'gemini-2.5-flash']
+        report_text = None
         
-        try:
-            response = client.models.generate_content(
-                model='gemini-3.8-flash',
-                contents=prompt,
-                config=types.GenerateContentConfig(
-                    automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True)
-                )
-            )
-            report_text = response.text
-            
-            # 呈現報告
+        with st.spinner("🤖 AI 正在撰寫 900 字分析報告（若遇伺服器繁忙將自動重試）..."):
+            for model_name in models_to_try:
+                for attempt in range(1, 4): # 每個模型重試最多 3 次
+                    try:
+                        response = client.models.generate_content(
+                            model=model_name,
+                            contents=prompt,
+                            config=types.GenerateContentConfig(
+                                automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True)
+                            )
+                        )
+                        report_text = response.text
+                        break
+                    except Exception as e:
+                        wait_time = attempt * 5 # 遇到 503 時，遞增等待 5s, 10s
+                        time.sleep(wait_time)
+                
+                if report_text:
+                    break
+
+        if report_text:
             st.markdown("---")
             st.subheader(f"📈 《{fund_name}》- {action_type} 決策分析報告")
             st.markdown(report_text)
@@ -126,6 +138,5 @@ if st.button("🚀 生成分析報告", type="primary", use_container_width=True
                 file_name=f"{fund_name}_{action_type}_Report.txt",
                 mime="text/plain"
             )
-            
-        except Exception as e:
-            st.error(f"❌ 報告生成失敗：{e}")
+        else:
+            st.error("❌ Google API 伺服器目前持續繁忙中，請稍等半分鐘後重新點擊「生成分析報告」！")
