@@ -50,7 +50,7 @@ def fetch_realtime_context(query):
         feed = feedparser.parse(rss_url)
         
         news_list = []
-        for entry in feed.entries[:5]:
+        for entry in feed.entries[:4]: # 控制抓取量以降低 Token 消耗
             title = entry.get('title', '')
             published = entry.get('published', '')
             summary = entry.get('summary', '')[:80]
@@ -103,8 +103,8 @@ if st.button("🚀 生成分析報告", type="primary", use_container_width=True
 3. **專業度要求**：使用標準金融機構用語（如：殖利率、基點 bps、折溢價、流動性溢價、久期 Duration、風險報酬比）。
 """
 
-        # 更新為最新的 Google Gemini API 官方模型名稱
-        models_to_try = ['gemini-3.8-flash', 'gemini-3.1-pro-preview']
+        # 免費版 API 請鎖定高配額的 Flash 模型，避免觸發 429 配額不足
+        models_to_try = ['gemini-3.8-flash']
         report_text = None
         last_error = ""
         
@@ -124,7 +124,8 @@ if st.button("🚀 生成分析報告", type="primary", use_container_width=True
                             break
                     except Exception as e:
                         last_error = str(e)
-                        time.sleep(attempt * 4) # 退避等待 4s, 8s, 12s
+                        # 發生 429/503 時退避等待 8 秒、16 秒，讓免費配額冷卻
+                        time.sleep(attempt * 8)
                 
                 if report_text:
                     break
@@ -142,4 +143,4 @@ if st.button("🚀 生成分析報告", type="primary", use_container_width=True
             )
         else:
             st.error(f"❌ 報告生成失敗。錯誤細節：{last_error}")
-            st.info("💡 請檢查 API Key 是否正確，或稍後再試。")
+            st.info("💡 請稍候約 10~20 秒後再次點擊「生成分析報告」，給予免費版 API 冷卻時間。")
