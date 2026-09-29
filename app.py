@@ -1,68 +1,51 @@
 import os
-import time
-import urllib.parse
-import feedparser
 import streamlit as st
 from openai import OpenAI
 
-# =====================================================
-# Streamlit 設定
-# =====================================================
-
 st.set_page_config(
-    page_title="AI 基金投資分析與金融市場情報平台",
-    page_icon="📊",
-    layout="wide"
+    page_title="基金分析測試",
+    page_icon="📊"
 )
 
-# =====================================================
-# API KEY
-# =====================================================
+st.title("📊 Qwen API 測試")
 
 try:
-    API_KEY = st.secrets["DASHSCOPE_API_KEY"]
+    api_key = st.secrets["DASHSCOPE_API_KEY"]
 except Exception:
-    API_KEY = os.getenv("DASHSCOPE_API_KEY", "")
+    api_key = os.getenv("DASHSCOPE_API_KEY", "")
 
-# =====================================================
-# Session State
-# =====================================================
+if not api_key:
+    st.error("找不到 DASHSCOPE_API_KEY")
+    st.stop()
 
-if "fund_report" not in st.session_state:
-    st.session_state.fund_report = ""
+st.success("✅ API Key 已載入")
 
-if "market_report" not in st.session_state:
-    st.session_state.market_report = ""
+fund_name = st.text_input(
+    "基金名稱",
+    value="SPY"
+)
 
-# =====================================================
-# Qwen
-# =====================================================
+if st.button("測試 Qwen"):
 
-def generate_qwen_response(prompt):
+    try:
 
-    client = OpenAI(
-        api_key=API_KEY,
-        base_url="https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
-    )
+        client = OpenAI(
+            api_key=api_key,
+            base_url="https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
+        )
 
-    models = [
-        "qwen-plus",
-        "qwen-max",
-        "qwen-turbo"
-    ]
+        response = client.chat.completions.create(
+            model="qwen-plus",
+            messages=[
+                {
+                    "role": "user",
+                    "content": f"請用繁體中文介紹 {fund_name} ETF"
+                }
+            ]
+        )
 
-    last_error = None
+        st.write(response.choices[0].message.content)
 
-    for model in models:
+    except Exception as e:
 
-        try:
-
-            response = client.chat.completions.create(
-                model=model,
-                messages=[
-                    {
-                        "role": "user",
-                        "content": prompt
-                    }
-                ],
-                temperature=
+        st.exception(e)
