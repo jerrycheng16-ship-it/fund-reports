@@ -184,14 +184,13 @@ if app_mode == "📰 每日要聞與總經月報":
 {"".join(raw_news)}
 ========================
 
-【任務要求 - 高排版可讀性機構研報】：
-請根據上述原始新聞資料，為機構投資人撰寫一份《每日金融市場要聞》。
+【任務要求 - 深度機構級研報】：
+請根據上述原始新聞資料，為機構投資人撰寫一份分析詳盡、論述充實且文筆流暢的《每日金融市場要聞》。
 
-【寫作與排版原則】：
-1. **多使用條列式（Bullet Points）**：每個重點請拆解為清晰的列表點（如 `-` 或 `*`），方便高階主管與投資人快速瀏覽。
-2. **關鍵字與數據請一律「粗體標示」**：如 **聯準會 (Fed)**、**降息 25 個基點**、**10 年期美債殖利率升至 3.85%**、**NVDA 漲幅 2.5%** 等，提升閱讀效率。
-3. **數據精準引用，嚴禁出現佔位符**：僅引述新聞中有出現的真正數據，絕不可出現 "XX"、"XX%"、"$XX" 等佔位符。
-4. **語系與術語**：統一使用標準繁體中文與台灣金融術語（如：殖利率、聯準會、通膨、基點 bps、折溢價）。
+【寫作原則】：
+1. **文字描述豐富且具深度**：每個章節請使用完整的段落敘述與深入的市場邏輯剖析，詳盡說明市場波動背後的驅動因素。
+2. **數據精準引用，絕不允許出現填空佔位符**：僅引述新聞中有出現的真正數據，絕不可出現 "XX"、"XX%"、"$XX" 等佔位符。未提及的數據無需刻意呈現。
+3. **語系與術語**：統一使用標準繁體中文與台灣金融術語（如：殖利率、聯準會、通膨、基點 bps、折溢價）。
 
 【報告章節結構】：
 一、全球金融市場焦點與數據速覽
@@ -256,14 +255,14 @@ if app_mode == "📰 每日要聞與總經月報":
                         monthly_combined_text += f"\n\n=== {date_str} 數據與論述 ===\n" + f.read()[:800]
                 
                 monthly_prompt = f"""
-你是一位機構首席經濟學家。請針對 {target_month} 月份每日金融市場紀錄進行融會貫通，撰寫一份高規格、論述詳盡且可讀性強的《{target_month} 全球金融市場總經趨勢月報》。
+你是一位機構首席經濟學家。請針對 {target_month} 月份每日金融市場紀錄進行融會貫通，撰寫一份高規格、論述詳盡的《{target_month} 全球金融市場總經趨勢月報》。
 
 === 全月資料紀錄 ===
 {monthly_combined_text}
 ===================
 
 【任務要求】：
-請進行全月核心主軸歸納與深度趨勢分析，多使用條列式（Bullet Points）呈現，重點主題與關鍵數據請加粗標示，絕不可出現 "XX" 等佔位符符號。
+請進行全月核心主軸歸納與深度趨勢分析，文字敘述需豐富充實，絕對不可出現 "XX" 等佔位符符號。
 
 【月報架構】：
 一、全月總經核心主軸與央行政策轉折
@@ -299,6 +298,7 @@ elif app_mode == "📊 全球總體經濟數據 (Yahoo Finance)":
     if "custom_indicators" not in st.session_state:
         st.session_state.custom_indicators = DEFAULT_YAHOO_INDICATORS.copy()
 
+    # 初始化目前在下方選擇進行繪圖的指標列表
     if "selected_indicators_list" not in st.session_state:
         st.session_state.selected_indicators_list = ["美國 10 年期公債殖利率 (%)", "S&P 500 指數"]
 
@@ -336,7 +336,9 @@ elif app_mode == "📊 全球總體經濟數據 (Yahoo Finance)":
                 st.write(" ")
                 st.write(" ")
                 if st.button("➕ 加入指標對比"):
+                    # 將新指標註冊進資料庫
                     st.session_state.custom_indicators[final_name] = selected_item['code']
+                    # 自動勾選此新指標，讓它立刻在下方繪製呈現！
                     if final_name not in st.session_state.selected_indicators_list:
                         st.session_state.selected_indicators_list.append(final_name)
                     st.success(f"✅ 成功將【{final_name}】加入圖表對比！")
@@ -347,6 +349,7 @@ elif app_mode == "📊 全球總體經濟數據 (Yahoo Finance)":
     col_s1, col_s2, col_s3, col_s4 = st.columns([2, 1, 1, 1])
     
     valid_options = list(st.session_state.custom_indicators.keys())
+    # 確保 selected_indicators_list 中的項目都存在於 valid_options 中
     st.session_state.selected_indicators_list = [k for k in st.session_state.selected_indicators_list if k in valid_options]
 
     with col_s1:
@@ -355,6 +358,7 @@ elif app_mode == "📊 全球總體經濟數據 (Yahoo Finance)":
             valid_options,
             default=st.session_state.selected_indicators_list
         )
+        # 同步更新 session state 中的已選清單
         st.session_state.selected_indicators_list = selected_indicators
 
     with col_s2:
@@ -381,6 +385,7 @@ elif app_mode == "📊 全球總體經濟數據 (Yahoo Finance)":
                     if not s_df.empty:
                         series = s_df.set_index('Date')[code]
                         
+                        # 依據選單選項即時轉化計算
                         if calc_mode == "年增率 (YoY %)":
                             processed = series.pct_change(252) * 100
                         elif calc_mode == "月/日增額 (Diff)":
@@ -389,7 +394,7 @@ elif app_mode == "📊 全球總體經濟數據 (Yahoo Finance)":
                             processed = series
                             
                         res_df = processed.to_frame(name=ind_name).reset_index()
-                        res_df = res_df.dropna().tail(60)
+                        res_df = res_df.dropna().tail(60) # 擷取最近 60 個交易日
                         
                         if combined_df.empty:
                             combined_df = res_df
@@ -559,7 +564,7 @@ elif app_mode == "🎯 基金 / ETF 交易決策評估":
 ---
 
 ### 一、當前總體經濟環境與市場脈絡分析
-（深入剖析當前利率環境、央行政策與宏觀經濟變數對此資產類別的影響，文字需豐富具體，請多使用條列式與關鍵字粗體）
+（深入剖析當前利率環境、央行政策與宏觀經濟變數對此資產類別的影響，文字需豐富具體）
 
 ### 二、標的屬性與最新市場衝擊評估 ({fund_name})
 （結合最新新聞數據與基本面，詳述此資產當前面臨的利多與利空變數，嚴禁出現 XX 佔位符）
