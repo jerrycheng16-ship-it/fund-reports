@@ -1,3 +1,7 @@
 streamlit
 openai
 feedparser
+pandas
+pandas-datareader
+plotly
+yfinance
