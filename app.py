@@ -96,7 +96,7 @@ def fetch_realtime_news(query):
 
         news_list = []
 
-        for entry in feed.entries[:10\]:
+        for entry in feed.entries[:10]:
 
             title = entry.get("title", "")
             summary = entry.get("summary", "")
