@@ -6,6 +6,8 @@ import json
 import datetime
 from datetime import timezone, timedelta
 import urllib.parse
+import urllib.request
+import io
 import feedparser
 import pandas as pd
 import yfinance as yf
@@ -27,13 +29,13 @@ st.set_page_config(
 api_key = st.secrets.get("DASHSCOPE_API_KEY", os.environ.get("DASHSCOPE_API_KEY", ""))
 
 st.title("📈 AI 機構級金融市場研報與總經決策系統")
-st.caption("自動彙整實時總經新聞、Yahoo 財經總經與市場數據連動圖表、每日研報/月報，以及資產交易決策評估。")
+st.caption("自動彙整實時總經新聞、Yahoo / FRED 雙資料源動態連動圖表、每日研報/月報，以及資產交易決策評估。")
 
 # ---------------------------------------------------------
 # 2. 側邊欄選單
 # ---------------------------------------------------------
 with st.sidebar:
-    st.header("⚙️ 功能選單")
+    st.header("⚙️️ 功能選單")
     
     if api_key:
         st.success("🔒 API Key 已由系統安全載入")
@@ -43,11 +45,11 @@ with st.sidebar:
     st.markdown("---")
     app_mode = st.radio(
         "請選擇功能模組：",
-        ["📰 每日要聞與總經月報", "📊 全球總體經濟數據 (Yahoo Finance)", "🎯 基金 / ETF 交易決策評估"]
+        ["📰 每日要聞與總經月報", "📊 全球總體經濟數據 (Yahoo & FRED)", "🎯 基金 / ETF 交易決策評估"]
     )
 
 # ---------------------------------------------------------
-# 3. 工具函數 (Qwen API & Yahoo Finance 數據抓取)
+# 3. 工具函數 (Qwen API & 雙資料源抓取)
 # ---------------------------------------------------------
 def call_qwen_api(messages_list):
     if not api_key:
@@ -80,13 +82,13 @@ def clean_html(raw_html):
     cleanr = re.compile('<.*?>')
     return re.sub(cleanr, '', raw_html)
 
-# Yahoo Finance 常用總經與市場標的代碼表
-DEFAULT_YAHOO_INDICATORS = {
+# 常用總經與市場標的代碼表 (包含 Yahoo Ticker 與 FRED Series ID)
+DEFAULT_INDICATORS = {
     "美國 10 年期公債殖利率 (%)": "^TNX",
-    "美國 13 週國庫券利率 (%)": "^IRX",
     "S&P 500 指數": "^GSPC",
-    "納斯達克指數 (NASDAQ)": "^IXIC",
-    "費城半導體指數 (SOX)": "^SOX",
+    "美國 核心 PCE 物價指數": "PCEPILFE",
+    "美國 實質 GDP (Real GDP)": "GDPC1",
+    "美國 CPI 消費者物價指數": "CPIAUCSL",
     "黃金期貨 (Gold)": "GC=F",
     "原油期貨 (WTI Crude)": "CL=F",
     "美元指數 (DXY)": "DX-Y.NYB",
@@ -95,16 +97,18 @@ DEFAULT_YAHOO_INDICATORS = {
 }
 
 def search_symbol_by_llm(keyword):
-    """利用 Qwen AI 智慧搜尋最匹配的 Yahoo Finance Ticker 代碼"""
+    """利用 Qwen AI 智慧搜尋，同時給出 Yahoo Ticker 與 FRED Series ID 最合適的代碼"""
     prompt = f"""
-你是一個精通 Yahoo Finance (財經) 資料庫的金融專家。
+你是一個精通全球金融市場（Yahoo Finance 與 FRED 數據庫）的總經專家。
 使用者輸入的自然語言關鍵字為："{keyword}"
 
-請提供 3 個最精準、最常用的 Yahoo Finance Ticker 代碼與對應名稱。
+請提供 3 個最精準的資料代碼。若屬總經指標（如 GDP, CPI, PCE, 失業率），請優先提供 FRED Series ID（如 GDPC1, CPIAUCSL）；若屬市場指數或資產，提供 Yahoo Ticker。
+
 請嚴格以 JSON 陣列格式輸出，不要加任何多餘說明：
 [
-  {{"code": "^TNX", "name": "US 10-Year Treasury Yield"}},
-  {{"code": "TLT", "name": "iShares 20+ Year Treasury Bond ETF"}}
+  {{"code": "GDPC1", "name": "US Real GDP", "source": "FRED"}},
+  {{"code": "^TNX", "name": "US 10-Year Treasury Yield", "source": "Yahoo"}},
+  {{"code": "PCEPILFE", "name": "US Core PCE Index", "source": "FRED"}}
 ]
 """
     res, err = call_qwen_api([{"role": "user", "content": prompt}])
@@ -119,12 +123,13 @@ def search_symbol_by_llm(keyword):
     return []
 
 @st.cache_data(ttl=3600)
-def fetch_yahoo_series_yf(symbol):
-    """使用 yfinance 自動處理 Cookie 與 Crumb 驗證，獲取歷史數據"""
+def fetch_smart_data(symbol):
+    """智慧雙資料源下載：優先嘗試 Yahoo Finance，無數據時自動無縫切換 FRED 免費 CSV"""
+    # 1. 嘗試 Yahoo Finance (yfinance)
     try:
         ticker = yf.Ticker(symbol)
-        df = ticker.history(period="2y")
-        if not df.empty:
+        df = ticker.history(period="3y")
+        if not df.empty and len(df) > 5:
             df = df.reset_index()
             val_col = 'Close' if 'Close' in df.columns else df.columns[1]
             df['Date'] = pd.to_datetime(df['Date']).dt.tz_localize(None)
@@ -133,6 +138,27 @@ def fetch_yahoo_series_yf(symbol):
             return df
     except Exception:
         pass
+
+    # 2. 自動切換至 FRED 免費 CSV API
+    clean_code = symbol.replace("^", "").strip()
+    fred_url = f"https://fred.stlouisfed.org/graph/fredgraph.csv?id={clean_code}"
+    try:
+        req = urllib.request.Request(
+            fred_url, 
+            headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36'}
+        )
+        with urllib.request.urlopen(req, timeout=10) as response:
+            csv_data = response.read()
+            
+        df = pd.read_csv(io.BytesIO(csv_data))
+        if not df.empty and 'DATE' in df.columns:
+            df['Date'] = pd.to_datetime(df['DATE'], errors='coerce')
+            df[symbol] = pd.to_numeric(df[clean_code], errors='coerce')
+            df = df[['Date', symbol]].dropna().sort_values('Date')
+            return df
+    except Exception:
+        pass
+
     return pd.DataFrame()
 
 # ---------------------------------------------------------
@@ -202,10 +228,6 @@ if app_mode == "📰 每日要聞與總經月報":
 ### 2. 霍爾木茲海峽航運漸復與油價拉回：布蘭特原油滑落至 $102 區域
 **中東地緣溢價獲利回吐**：隨著伊朗與美國在白宮峰會後的非正式溝通管道保持運作，且霍爾木茲海峽部分商業航運秩序逐步恢復，國際原油期貨價格持續自高點回落。**布蘭特原油（Brent）**回落至每桶 **$102.50** 附近，**西德州原油（WTI）**跌破 **$91.80**。
 **滯脹恐慌降溫，但黏性通膨猶存**：油價自百元高點連續拉回減輕了市場對「極端滯脹（Stagflation）」的即時恐慌，但華爾街分析指出，隨著 Q4 進入北半球冬季能源需求旺季，能源成本傳導至 CPI 核心項目的滯後效應仍是 **Fed** 難以轉鴿的主因。
-
-### 3. 個股與板塊動向：伺服器水冷需求爆發 vs. 零售買氣疲軟
-**Super Micro（SMCI）與液冷/電力設備族群大反彈**：《Barron's》重點分析指出，儘管市場審視 AI 軟體變現速度，但資料中心對「散熱與電力網升級」的硬體資本支出（CapEx）呈現剛性需求。**Super Micro Computer（超微電腦）**因其最新高密度液冷（DLC）伺服器架構出貨優於預期，**股價逆勢大漲超 5%**，帶動電網設備與水冷供應鏈走強。
-**美中雙邊科技企業的資本動向**：市場持續消化「川習會」建立 AI 安全規範機率的影響。受惠於企業端對代理型 AI（Agentic AI）硬體算力的持續拉貨，**Nvidia**、**AMD** 與 **Meta** 等龍頭股於平盤附近展現強勁支撐。
 ==================
 
 請開始編寫今日的 3 ~ 4 點每日要聞：
@@ -301,30 +323,30 @@ if app_mode == "📰 每日要聞與總經月報":
                 )
 
 # ---------------------------------------------------------
-# 模組二：全球總體經濟數據 (yfinance 資料源 + 智慧搜尋 + Plotly 雙 Y 軸圖)
+# 模組二：全球總體經濟數據 (yfinance & FRED 雙資料源 + Plotly 雙 Y 軸圖)
 # ---------------------------------------------------------
-elif app_mode == "📊 全球總體經濟數據 (Yahoo Finance)":
-    st.header("📊 全球總體經濟與市場數據庫 (Yahoo Finance 資料源)")
-    st.caption("連線 Yahoo Finance 擷取美債殖利率、匯率、大宗商品與指數數據，支援 Level/YoY/Diff 轉化與線上動態編輯器！")
+elif app_mode == "📊 全球總體經濟數據 (Yahoo & FRED)":
+    st.header("📊 全球總體經濟與市場數據庫 (Yahoo & FRED 智慧雙資料源)")
+    st.caption("自動連線 Yahoo Finance 與 FRED 資料庫，支援 GDP、CPI、PCE、美債殖利率與股市指數，提供 Level/YoY/Diff 轉化與互動圖表！")
 
     if "custom_indicators" not in st.session_state:
-        st.session_state.custom_indicators = DEFAULT_YAHOO_INDICATORS.copy()
+        st.session_state.custom_indicators = DEFAULT_INDICATORS.copy()
 
     if "selected_indicators_list" not in st.session_state:
         st.session_state.selected_indicators_list = ["美國 10 年期公債殖利率 (%)", "S&P 500 指數"]
 
     # 1. AI 智慧搜尋區塊
-    with st.expander("🔍 智慧搜尋 Yahoo 財經代碼 / 新增自訂指標", expanded=True):
+    with st.expander("🔍 智慧搜尋數據代碼 / 新增自訂指標", expanded=True):
         col_sch1, col_sch2 = st.columns([3, 1])
         with col_sch1:
-            search_query = st.text_input("輸入想尋找的市場數據名稱（中英文皆可）：", placeholder="例如：美債10年期, 台積電, S&P500, 比特幣, 黃金")
+            search_query = st.text_input("輸入想尋找的數據名稱（中英文皆可）：", placeholder="例如：US GDP, 美國CPI, 台積電, S&P500, 比特幣, 黃金")
         with col_sch2:
             st.write(" ")
             st.write(" ")
-            do_search = st.button("🔎 搜尋 Yahoo Ticker", type="primary")
+            do_search = st.button("🔎 搜尋數據代碼", type="primary")
 
         if do_search and search_query:
-            with st.spinner(f"正在搜尋與 '{search_query}' 最匹配的 Yahoo 財經代碼..."):
+            with st.spinner(f"正在搜尋與 '{search_query}' 最匹配的代碼..."):
                 search_results = search_symbol_by_llm(search_query)
                 if search_results:
                     st.session_state.search_results = search_results
@@ -332,9 +354,9 @@ elif app_mode == "📊 全球總體經濟數據 (Yahoo Finance)":
                     st.warning("⚠️ 未找到匹配的代碼，請嘗試更換關鍵字。")
 
         if "search_results" in st.session_state and st.session_state.search_results:
-            st.markdown("##### 🎯 匹配到的 Yahoo 財經代碼建議：")
+            st.markdown("##### 🎯 匹配到的數據代碼建議：")
             res_options = {
-                f"{item['name']} (Ticker: {item['code']})": item 
+                f"{item['name']} (Code: {item['code']} - Source: {item.get('source', 'Auto')})": item 
                 for item in st.session_state.search_results
             }
             selected_match_label = st.selectbox("選擇欲加入的數據指標：", list(res_options.keys()))
@@ -382,18 +404,20 @@ elif app_mode == "📊 全球總體經濟數據 (Yahoo Finance)":
         st.warning("⚠️ 請至少選擇一項指標進行繪圖與編輯！")
     else:
         combined_df = pd.DataFrame()
-        with st.spinner("連線 Yahoo Finance 擷取數據中..."):
+        with st.spinner("智慧連線 Yahoo / FRED 擷取數據中..."):
             for ind_name in selected_indicators:
                 code_item = st.session_state.custom_indicators.get(ind_name, "")
                 code = code_item if isinstance(code_item, str) else code_item.get("code", "")
                 
                 if code:
-                    s_df = fetch_yahoo_series_yf(code)
+                    s_df = fetch_smart_data(code)
                     if not s_df.empty:
                         series = s_df.set_index('Date')[code]
                         
+                        # 判斷資料頻率並轉化
                         if calc_mode == "年增率 (YoY %)":
-                            processed = series.pct_change(252) * 100
+                            shift_n = 4 if len(series) < 50 else (12 if len(series) < 300 else 252)
+                            processed = series.pct_change(shift_n) * 100
                         elif calc_mode == "月/日增額 (Diff)":
                             processed = series.diff()
                         else:
@@ -467,7 +491,7 @@ elif app_mode == "📊 全球總體經濟數據 (Yahoo Finance)":
                 st.subheader("📈 市場趨勢雙 Y 軸動態圖表")
                 st.plotly_chart(fig, use_container_width=True)
         else:
-            st.error("⚠️ 無法連線至 Yahoo Finance 讀取數據，請確認網路連線或稍後再試。")
+            st.error("⚠️ 無法連線讀取數據，請確認網路連線或稍後再試。")
 
 # ---------------------------------------------------------
 # 模組三：基金 / ETF 交易決策評估
@@ -576,7 +600,7 @@ elif app_mode == "🎯 基金 / ETF 交易決策評估":
 （結合最新新聞數據與基本面，詳述此資產當前面臨的利多與利空變數，嚴禁出現 XX 佔位符）
 
 ### 三、買賣方向 ({action_type}) 可行性評估與風控/停損策略
-（針對擬執行的 {action_type} 方向，給出明確的邏輯支撐、部位規模建議、停損點與停利區間）
+（針對擬執行的 {action_type} 方向，给出一明確的邏輯支撐、部位規模建議、停損點與停利區間）
 """
             with st.spinner("🤖 Qwen 分析師正在編製獨立結構表格與撰寫評估報告..."):
                 report, err = call_qwen_api([{"role": "user", "content": prompt}])
