@@ -82,7 +82,7 @@ def clean_html(raw_html):
     cleanr = re.compile('<.*?>')
     return re.sub(cleanr, '', raw_html)
 
-# 常用總經與市場標的代碼表 (包含 Yahoo Ticker 與 FRED Series ID)
+# 常用總經與市場標的代碼表
 DEFAULT_INDICATORS = {
     "美國 10 年期公債殖利率 (%)": "^TNX",
     "S&P 500 指數": "^GSPC",
@@ -97,15 +97,14 @@ DEFAULT_INDICATORS = {
 }
 
 def search_symbol_by_llm(keyword):
-    """利用 Qwen AI 智慧搜尋，同時給出 Yahoo Ticker 與 FRED Series ID 最合適的代碼"""
     prompt = f"""
 你是一個精通全球金融市場（Yahoo Finance 與 FRED 數據庫）的總經專家。
 使用者輸入的自然語言關鍵字為："{keyword}"
 
 請提供 3 個最精準的資料代碼。
 注意：
-1. 若屬總經指標（如 GDP, CPI, PCE, 失業率, 貨幣供給 M2），請務必提供 FRED 正確 Series ID（例如 GDP 提供 GDPC1、CPI 提供 CPIAUCSL，嚴禁寫成無效的 GDP 或 $GDP）。
-2. 若屬市場指數或資產，提供 Yahoo Ticker（如 ^TNX, ^GSPC, TSLA）。
+1. 若屬總經指標（如 GDP, CPI, PCE, 失業率），請務必提供 FRED 正確 Series ID（例如 GDP 提供 GDPC1、CPI 提供 CPIAUCSL）。
+2. 若屬市場指數或資產，提供 Yahoo Ticker（如 ^TNX, ^GSPC）。
 
 請嚴格以 JSON 陣列格式輸出，不要加任何多餘說明：
 [
@@ -127,21 +126,52 @@ def search_symbol_by_llm(keyword):
 
 @st.cache_data(ttl=3600)
 def fetch_smart_data(symbol):
-    """智慧雙資料源下載：清理代碼後，自動切換 FRED CSV 與 Yahoo Finance"""
+    """智慧雙資料源下載：明確區分總經代碼與股市代碼"""
     raw_code = str(symbol).strip().replace("$", "")
     
-    # 特殊別名轉指 FRED 標準代碼
-    fred_mapping = {
-        "GDP": "GDPC1",
-        "CPI": "CPIAUCSL",
-        "PCE": "PCEPILFE",
-        "UNRATE": "UNRATE"
-    }
+    # 常用總經代碼清單，直接強制走 FRED
+    fred_indicators = ["GDPC1", "CPIAUCSL", "PCEPILFE", "UNRATE", "FEDFUNDS", "DGS10", "DGS2"]
     
-    clean_code = fred_mapping.get(raw_code.upper(), raw_code)
+    is_fred_code = raw_code.upper() in fred_indicators or not raw_code.startswith("^") and not "=" in raw_code and len(raw_code) >= 5 and raw_code[0].isalpha() and raw_code[-1].isdigit()
 
-    # 1. 優先嘗試 FRED 免費 CSV (針對總經代碼，如 GDPC1, PCEPILFE, CPIAUCSL 等)
-    fred_url = f"https://fred.stlouisfed.org/graph/fredgraph.csv?id={clean_code.replace('^', '')}"
+    # 1. 如果判斷是總經指標，優先走 FRED
+    if is_fred_code or raw_code.upper() in ["GDPC1", "CPIAUCSL", "PCEPILFE", "UNRATE"]:
+        fred_url = f"https://fred.stlouisfed.org/graph/fredgraph.csv?id={raw_code}"
+        try:
+            req = urllib.request.Request(
+                fred_url, 
+                headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36'}
+            )
+            with urllib.request.urlopen(req, timeout=8) as response:
+                csv_data = response.read()
+                
+            df = pd.read_csv(io.BytesIO(csv_data))
+            if not df.empty and 'DATE' in df.columns:
+                df['Date'] = pd.to_datetime(df['DATE'], errors='coerce')
+                val_col = [c for c in df.columns if c != 'DATE'][0]
+                df[symbol] = pd.to_numeric(df[val_col], errors='coerce')
+                df = df[['Date', symbol]].dropna().sort_values('Date')
+                if len(df) > 2:
+                    return df
+        except Exception:
+            pass
+
+    # 2. 嘗試 Yahoo Finance (yfinance)
+    try:
+        ticker = yf.Ticker(raw_code)
+        df = ticker.history(period="3y")
+        if not df.empty and len(df) > 2:
+            df = df.reset_index()
+            val_col = 'Close' if 'Close' in df.columns else df.columns[1]
+            df['Date'] = pd.to_datetime(df['Date']).dt.tz_localize(None)
+            df[symbol] = pd.to_numeric(df[val_col], errors='coerce')
+            df = df[['Date', symbol]].dropna().sort_values('Date')
+            return df
+    except Exception:
+        pass
+
+    # 3. 備用：若 Yahoo 失敗，再試一次 FRED
+    fred_url = f"https://fred.stlouisfed.org/graph/fredgraph.csv?id={raw_code}"
     try:
         req = urllib.request.Request(
             fred_url, 
@@ -156,22 +186,8 @@ def fetch_smart_data(symbol):
             val_col = [c for c in df.columns if c != 'DATE'][0]
             df[symbol] = pd.to_numeric(df[val_col], errors='coerce')
             df = df[['Date', symbol]].dropna().sort_values('Date')
-            if len(df) > 5:
+            if len(df) > 2:
                 return df
-    except Exception:
-        pass
-
-    # 2. 嘗試 Yahoo Finance (yfinance)
-    try:
-        ticker = yf.Ticker(raw_code)
-        df = ticker.history(period="2y")
-        if not df.empty and len(df) > 5:
-            df = df.reset_index()
-            val_col = 'Close' if 'Close' in df.columns else df.columns[1]
-            df['Date'] = pd.to_datetime(df['Date']).dt.tz_localize(None)
-            df[symbol] = pd.to_numeric(df[val_col], errors='coerce')
-            df = df[['Date', symbol]].dropna().sort_values('Date')
-            return df
     except Exception:
         pass
 
@@ -235,17 +251,6 @@ if app_mode == "📰 每日要聞與總經月報":
 2. **段落前綴**：每個子段落開頭必須使用 **粗體前綴名稱加冒號**（例如 `債市賣壓放緩但高檔震盪：`、`大盤月線與季線結算壓力：`）。
 3. **數據與關鍵字粗體**：內文中所有 key 數據、公司名稱、指標均需**粗體標示**。
 4. **精準真實數據**：僅使用新聞中有出現的真數據，嚴禁出現 "XX" 佔位符。
-
-=== 參考排版範例 ===
-### 1. 10 年期美債殖利率維持 5.20% 高位，9 月「月線收黑」與 10 月升息倒數
-**債市賣壓放緩但高檔震盪**：在上週末衝破 **5.20%** 創下近 19 年新高後，指標 **10 年期美債殖利率**週一於 **5.18%–5.20%** 區間高檔狹幅盤整；**30 年期美債殖利率**亦維持於 **5.45%** 上方。
-**大盤月線與季線結算壓力**：受「Higher for Longer」利率環境與 10 月 28–29 日 **FOMC 再升息 1 碼（25 bps，機率約 66%）** 的預期壓制，美股三大指數週一開低走低（**道瓊下跌超 200 點**，**標普 500 下跌 0.4%**），**標普 500** 本月累計下跌逾 **2.2%**，將錄得今年 4 月以來首個單月收黑的月份。
-
-### 2. 霍爾木茲海峽航運漸復與油價拉回：布蘭特原油滑落至 $102 區域
-**中東地緣溢價獲利回吐**：隨著伊朗與美國在白宮峰會後的非正式溝通管道保持運作，且霍爾木茲海峽部分商業航運秩序逐步恢復，國際原油期貨價格持續自高點回落。**布蘭特原油（Brent）**回落至每桶 **$102.50** 附近，**西德州原油（WTI）**跌破 **$91.80**。
-==================
-
-請開始編寫今日的 3 ~ 4 點每日要聞：
 """
                 with st.spinner("🤖 Qwen 首席分析師正在進行深度研報撰寫與脈絡梳理..."):
                     report_content, err = call_qwen_api([{"role": "user", "content": prompt}])
@@ -312,13 +317,6 @@ if app_mode == "📰 每日要聞與總經月報":
 
 【任務要求】：
 請進行全月核心主軸歸納與深度趨勢分析，段落前標題與重點數據請加粗標示，絕不可出現 "XX" 等佔位符符號。
-
-【月報架構】：
-一、全月總經核心主軸與央行政策轉折
-二、全球權益市場月度回顧與重點表現
-三、債券市場與殖利率曲線動向
-四、外匯與大宗商品（黃金/原油）走勢脈絡
-五、下月展望與資產配置建議
 """
                 with st.spinner("🤖 Qwen 正進行數據彙整與深度月報撰寫..."):
                     monthly_report, err = call_qwen_api([{"role": "user", "content": monthly_prompt}])
