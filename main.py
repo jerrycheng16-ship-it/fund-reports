@@ -60,7 +60,7 @@ def call_qwen_api(messages_list):
             response = client.chat.completions.create(
                 model=model_name,
                 messages=messages_list,
-                temperature=0.6 # 提高溫度以增加語言豐富度與分析深度
+                temperature=0.5
             )
             if response and response.choices:
                 return response.choices[0].message.content, None
@@ -92,7 +92,7 @@ if app_mode == "📰 每日要聞與總經月報":
         st.subheader("📡 即時抓取路透社與 Yahoo 財經新聞摘要並編譯研報")
         st.info(f"📅 基準日期（台灣時間）：{today_dt.strftime('%Y 年 %m 月 %d 日')}")
         
-        if st.button("🚀 即時編譯今日研報 (深度分析版)", type="primary"):
+        if st.button("🚀 即時編譯今日研報", type="primary"):
             with st.spinner("正在專注擷取路透社 (Reuters) 與 Yahoo 財經最新新聞與市場數據..."):
                 rss_urls = [
                     "https://news.google.com/rss/search?q=site:cn.reuters.com+OR+site:reuters.com&hl=zh-TW&gl=TW&ceid=TW:zh-Hant",
@@ -128,25 +128,20 @@ if app_mode == "📰 每日要聞與總經月報":
 請根據上述原始新聞資料，為機構投資人撰寫一份分析詳盡、論述充實且文筆流暢的《每日金融市場要聞》。
 
 【寫作原則】：
-1. **文字描述豐富且具深度**：
-   - 每個章節請使用**完整的段落敘述與深入的市場邏輯剖析**，詳盡說明市場波動背後的驅動因素（例如：聯準會政策預期變動、資金流向、通膨數據衝擊、企業獲利展望等）。
-   - 請提供專業、權威的金融市場洞察，切忌過度簡短或只有單薄的三言兩語。
-2. **數據精準引用，絕對禁止填空佔位符**：
-   - 若新聞資料中有明確數據（如 %、bps、美元價值、指數點位），請精準融入文字敘述中。
-   - **最高禁令：絕不許出現任何 "XX"、"XX%"、"$XX" 等預設佔位符符號**。未提及的數字無須刻意列出，著重於定性分析與已有數據的深度解讀即可。
+1. **文字描述豐富且具深度**：每個章節請使用完整的段落敘述與深入的市場邏輯剖析，詳盡說明市場波動背後的驅動因素。
+2. **數據精準引用，絕不允許出現填空佔位符**：僅引述新聞中有出現的真正數據，絕不可出現 "XX"、"XX%"、"$XX" 等佔位符。未提及的數據無需刻意呈現。
 3. **語系與術語**：統一使用標準繁體中文與台灣金融術語（如：殖利率、聯準會、通膨、基點 bps、折溢價）。
 
 【報告章節結構】：
-一、全球金融市場焦點與數據速覽（詳細說明今日市場最核心的宏觀事件與趨勢）
-二、總體經濟、央行政策與債券市場（深入分析美債殖利率走向、央行態度與通膨脈絡）
-三、科技產業與企業財務動態（詳述重點個股/產業鏈的最新發展與市場反應）
-四、外匯、大宗商品與信用市場（分析美元、黃金、原油波動原因與資金避險動向）
+一、全球金融市場焦點與數據速覽
+二、總體經濟、央行政策與債券市場
+三、科技產業與企業財務動態
+四、外匯、大宗商品與信用市場
 """
                 with st.spinner("🤖 Qwen 首席分析師正在進行深度研報撰寫與脈絡梳理..."):
                     report_content, err = call_qwen_api([{"role": "user", "content": prompt}])
                     if report_content:
                         st.session_state.today_report = report_content
-                        # 備份寫入 daily_reports 資料夾
                         os.makedirs("daily_reports", exist_ok=True)
                         with open(f"daily_reports/{today_str}.md", "w", encoding="utf-8") as f:
                             f.write(report_content)
@@ -210,9 +205,9 @@ if app_mode == "📰 每日要聞與總經月報":
 請進行全月核心主軸歸納與深度趨勢分析，文字敘述需豐富充實，絕對不可出現 "XX" 等佔位符符號。
 
 【月報架構】：
-一、全月總經核心主軸與央行政策轉折（詳細剖析）
-二、全球權益市場月度回顧與重點表現（文字詳述與邏輯整理）
-三、債券市場與殖利率曲線動向（市場定價與流動性分析）
+一、全月總經核心主軸與央行政策轉折
+二、全球權益市場月度回顧與重點表現
+三、債券市場與殖利率曲線動向
 四、外匯與大宗商品（黃金/原油）走勢脈絡
 五、下月展望與資產配置建議
 """
@@ -234,7 +229,7 @@ if app_mode == "📰 每日要聞與總經月報":
                 )
 
 # ---------------------------------------------------------
-# 模組二：基金 / ETF 交易決策評估 (支援二次對話微調)
+# 模組二：基金 / ETF 交易決策評估 (包含完整標的 Basic Profile)
 # ---------------------------------------------------------
 elif app_mode == "🎯 基金 / ETF 交易決策評估":
     st.header("🎯 基金 / ETF 投資決策與評估報告生成器")
@@ -256,7 +251,7 @@ elif app_mode == "🎯 基金 / ETF 交易決策評估":
         if not fund_name.strip():
             st.warning("⚠️ 請輸入標的名稱或代碼！")
         else:
-            with st.spinner(f"正在爬取 {fund_name} 相關實時新聞與路透/Yahoo數據..."):
+            with st.spinner(f"正在爬取 {fund_name} 相關實時新聞與基本面數據..."):
                 encoded_query = urllib.parse.quote(fund_name)
                 rss_url = f"https://news.google.com/rss/search?q={encoded_query}+OR+聯準會+OR+美債殖利率+OR+通膨&hl=zh-TW&gl=TW&ceid=TW:zh-Hant"
                 feed = feedparser.parse(rss_url)
@@ -277,26 +272,41 @@ elif app_mode == "🎯 基金 / ETF 交易決策評估":
                 lang_instruction = "每個段落請先提供「繁體中文」，隨後附上對應的「英文翻譯 (English Translation)」。"
 
             prompt = f"""
-你是一位機構級首席投資策略官。請針對交易規劃與實時市場脈絡，撰寫一份內容充實、深度分析的三段式《基金投資分析與決策評估報告》（總字數約 1000–1200 字）。
+你是一位機構級資深基金分析師與首席投資策略官。請針對標的【{fund_name}】，撰寫一份包含**完整標的檔案卡片**與**深度決策評估**的機構級報告。
 
 【基本交易資訊】：
-- 標的名稱/代碼：{fund_name}
+- 標的輸入：{fund_name}
 - 擬執行交易方向：{action_type}
 - 語言要求：{lang_instruction}
 
-【即時市場數據與新聞】：
+【即時市場新聞與數據】：
 {market_data}
 
-【撰寫要求與數據原則】：
-1. 詳盡剖析宏觀環境與個案衝擊，文字需專業且具說服力，嚴禁簡略。
-2. 僅引用新聞真實數據，嚴禁填入 "XX" 等未知的佔位符號。
+【撰寫格式與結構規範】：
 
-【報告結構】（分為三大段，每段約 350-400 字）：
-第一段：當前總體經濟環境與整體市場脈絡分析
-第二段：標的屬性、基本面與最新衝擊評估 ({fund_name})
-第三段：買賣方向 ({action_type}) 可行性評估、具體風控與停損/停利策略
+### 📌 零、標的基本檔案與配置概況 (Basic Profile & Portfolio Allocation)
+（請務必依據標的【{fund_name}】的公開發行資料精準整理並整理出以下項目；如為債券型/單一股票，請於產業/持股做相應專業說明，絕不要出現 "XX" 佔位符）
+- **基金/ETF 中文全稱**：
+- **基金/ETF 英文全稱**：
+- **追蹤指數 / 標的屬性**：
+- **基金規模 (AUM)**：
+- **前十大持股 (Top 10 Holdings)**：(請表列標的與預估權重)
+- **產業分布 (Sector Breakdown)**：(請表列主要產業占比)
+- **國家/區域分布 (Geographic Allocation)**：(請表列主要投資國家占比)
+- **歷史績效表現 (Performance Track Record)**：(包含近 1 年、近 3 年或今年以來 YTD 表現)
+
+---
+
+### 一、當前總體經濟環境與市場脈絡分析
+（深入剖析當前利率環境、央行政策與宏觀經濟變數對此資產類別的影響）
+
+### 二、標的屬性與最新市場衝擊評估 ({fund_name})
+（結合最新新聞數據，詳述此資產當前面臨的利多與利空變數）
+
+### 三、買賣方向 ({action_type}) 可行性評估與風控/停損策略
+（針對擬執行的 {action_type} 方向，給出明確的邏輯支撐、部位規模建議、停損點與停利區間）
 """
-            with st.spinner("🤖 Qwen 分析師正在撰寫深度評估報告..."):
+            with st.spinner("🤖 Qwen 分析師正在整理基金持股檔案與撰寫評估報告..."):
                 report, err = call_qwen_api([{"role": "user", "content": prompt}])
                 if report:
                     st.session_state.fund_report = report
@@ -305,25 +315,25 @@ elif app_mode == "🎯 基金 / ETF 交易決策評估":
                         "action_type": action_type,
                         "prompt": prompt
                     }
-                    st.success("✅ 決策報告生成完畢！")
+                    st.success("✅ 包含基本檔案與持股配置的決策報告生成完畢！")
                 else:
                     st.error(f"❌ 生成失敗: {err}")
 
     # 顯示個案報告與微調區塊
     if st.session_state.fund_report:
         st.markdown("---")
-        st.subheader(f"📈 《{st.session_state.fund_prompt_info.get('fund_name')}》- {st.session_state.fund_prompt_info.get('action_type')} 決策評估報告")
+        st.subheader(f"📈 《{st.session_state.fund_prompt_info.get('fund_name')}》- 標的檔案與 {st.session_state.fund_prompt_info.get('action_type')} 決策評估報告")
         st.markdown(st.session_state.fund_report)
         
         st.download_button(
-            "📥 下載此個案報告 (.txt)",
+            "📥 下載完整評估報告 (.txt)",
             st.session_state.fund_report,
             file_name=f"{st.session_state.fund_prompt_info.get('fund_name')}_{st.session_state.fund_prompt_info.get('action_type')}_Report.txt"
         )
 
         st.markdown("---")
         st.subheader("🔄 報告優化與對話式微調")
-        user_feedback = st.text_area("輸入對報告的修改需求或補充意見：", placeholder="例如：請針對聯準會降息預期對該標的利差衝擊進行更深入的討論...")
+        user_feedback = st.text_area("輸入對報告的修改需求或補充意見：", placeholder="例如：請針對前三大持股的權重變化進行更詳細的說明...")
         
         if st.button("✏️ 根據意見重新修正報告"):
             if not user_feedback.strip():
@@ -333,7 +343,7 @@ elif app_mode == "🎯 基金 / ETF 交易決策評估":
                     refine_messages = [
                         {"role": "user", "content": st.session_state.fund_prompt_info.get("prompt")},
                         {"role": "assistant", "content": st.session_state.fund_report},
-                        {"role": "user", "content": f"請根據以下意見修改上面的報告，保持深入且豐富的文字分析（嚴禁 XX 佔位符）：\n\n【修改意見】：{user_feedback}"}
+                        {"role": "user", "content": f"請根據以下意見修改上面的報告，保持標的基本檔案結構與充實的文字分析（嚴禁 XX 佔位符）：\n\n【修改意見】：{user_feedback}"}
                     ]
                     updated_report, err = call_qwen_api(refine_messages)
                     if updated_report:
