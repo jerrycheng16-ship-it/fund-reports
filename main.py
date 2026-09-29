@@ -184,19 +184,31 @@ if app_mode == "📰 每日要聞與總經月報":
 {"".join(raw_news)}
 ========================
 
-【任務要求 - 深度機構級研報】：
-請根據上述原始新聞資料，為機構投資人撰寫一份分析詳盡、論述充實且文筆流暢的《每日金融市場要聞》。
+【任務要求 - 嚴格遵照範例格式編寫機構研報】：
+請根據上述原始新聞資料，為機構投資人撰寫《每日金融市場要聞》。
 
-【寫作原則】：
-1. **文字描述豐富且具深度**：每個章節請使用完整的段落敘述與深入的市場邏輯剖析，詳盡說明市場波動背後的驅動因素。
-2. **數據精準引用，絕不允許出現填空佔位符**：僅引述新聞中有出現的真正數據，絕不可出現 "XX"、"XX%"、"$XX" 等佔位符。未提及的數據無需刻意呈現。
-3. **語系與術語**：統一使用標準繁體中文與台灣金融術語（如：殖利率、聯準會、通膨、基點 bps、折溢價）。
+【寫作與格式要求】：
+請嚴格參照以下格式範例進行排版與撰寫，包含：
+1. **標題格式**：採用 `數字. 主標題：子標題` 的形式。
+2. **段落前綴**：每個子段落開頭必須使用 **粗體前綴名稱加冒號**（例如 `債市賣壓放緩但高檔震盪：`、`大盤月線與季線結算壓力：`）。
+3. **數據與關鍵字粗體**：內文中所有 key 數據、公司名稱、指標均需**粗體標示**。
+4. **精準真實數據**：僅使用新聞中有出現的真數據，嚴禁出現 "XX" 佔位符。
 
-【報告章節結構】：
-一、全球金融市場焦點與數據速覽
-二、總體經濟、央行政策與債券市場
-三、科技產業與企業財務動態
-四、外匯、大宗商品與信用市場
+=== 參考排版範例 ===
+### 1. 10 年期美債殖利率維持 5.20% 高位，9 月「月線收黑」與 10 月升息倒數
+**債市賣壓放緩但高檔震盪**：在上週末衝破 **5.20%** 創下近 19 年新高後，指標 **10 年期美債殖利率**週一於 **5.18%–5.20%** 區間高檔狹幅盤整；**30 年期美債殖利率**亦維持於 **5.45%** 上方。
+**大盤月線與季線結算壓力**：受「Higher for Longer」利率環境與 10 月 28–29 日 **FOMC 再升息 1 碼（25 bps，機率約 66%）** 的預期壓制，美股三大指數週一開低走低（**道瓊下跌超 200 點**，**標普 500 下跌 0.4%**），**標普 500** 本月累計下跌逾 **2.2%**，將錄得今年 4 月以來首個單月收黑的月份。
+
+### 2. 霍爾木茲海峽航運漸復與油價拉回：布蘭特原油滑落至 $102 區域
+**中東地緣溢價獲利回吐**：隨著伊朗與美國在白宮峰會後的非正式溝通管道保持運作，且霍爾木茲海峽部分商業航運秩序逐步恢復，國際原油期貨價格持續自高點回落。**布蘭特原油（Brent）**回落至每桶 **$102.50** 附近，**西德州原油（WTI）**跌破 **$91.80**。
+**滯脹恐慌降溫，但黏性通膨猶存**：油價自百元高點連續拉回減輕了市場對「極端滯脹（Stagflation）」的即時恐慌，但華爾街分析指出，隨著 Q4 進入北半球冬季能源需求旺季，能源成本傳導至 CPI 核心項目的滯後效應仍是 **Fed** 難以轉鴿的主因。
+
+### 3. 個股與板塊動向：伺服器水冷需求爆發 vs. 零售買氣疲軟
+**Super Micro（SMCI）與液冷/電力設備族群大反彈**：《Barron's》重點分析指出，儘管市場審視 AI 軟體變現速度，但資料中心對「散熱與電力網升級」的硬體資本支出（CapEx）呈現剛性需求。**Super Micro Computer（超微電腦）**因其最新高密度液冷（DLC）伺服器架構出貨優於預期，**股價逆勢大漲超 5%**，帶動電網設備與水冷供應鏈走強。
+**美中雙邊科技企業的資本動向**：市場持續消化「川習會」建立 AI 安全規範機率的影響。受惠於企業端對代理型 AI（Agentic AI）硬體算力的持續拉貨，**Nvidia**、**AMD** 與 **Meta** 等龍頭股於平盤附近展現強勁支撐。
+==================
+
+請開始編寫今日的 3 ~ 4 點每日要聞：
 """
                 with st.spinner("🤖 Qwen 首席分析師正在進行深度研報撰寫與脈絡梳理..."):
                     report_content, err = call_qwen_api([{"role": "user", "content": prompt}])
@@ -255,14 +267,14 @@ if app_mode == "📰 每日要聞與總經月報":
                         monthly_combined_text += f"\n\n=== {date_str} 數據與論述 ===\n" + f.read()[:800]
                 
                 monthly_prompt = f"""
-你是一位機構首席經濟學家。請針對 {target_month} 月份每日金融市場紀錄進行融會貫通，撰寫一份高規格、論述詳盡的《{target_month} 全球金融市場總經趨勢月報》。
+你是一位機構首席經濟學家。請針對 {target_month} 月份每日金融市場紀錄進行融會貫通，撰寫一份高規格、論述詳盡且可讀性強的《{target_month} 全球金融市場總經趨勢月報》。
 
 === 全月資料紀錄 ===
 {monthly_combined_text}
 ===================
 
 【任務要求】：
-請進行全月核心主軸歸納與深度趨勢分析，文字敘述需豐富充實，絕對不可出現 "XX" 等佔位符符號。
+請進行全月核心主軸歸納與深度趨勢分析，段落前標題與重點數據請加粗標示，絕不可出現 "XX" 等佔位符符號。
 
 【月報架構】：
 一、全月總經核心主軸與央行政策轉折
@@ -298,7 +310,6 @@ elif app_mode == "📊 全球總體經濟數據 (Yahoo Finance)":
     if "custom_indicators" not in st.session_state:
         st.session_state.custom_indicators = DEFAULT_YAHOO_INDICATORS.copy()
 
-    # 初始化目前在下方選擇進行繪圖的指標列表
     if "selected_indicators_list" not in st.session_state:
         st.session_state.selected_indicators_list = ["美國 10 年期公債殖利率 (%)", "S&P 500 指數"]
 
@@ -336,9 +347,7 @@ elif app_mode == "📊 全球總體經濟數據 (Yahoo Finance)":
                 st.write(" ")
                 st.write(" ")
                 if st.button("➕ 加入指標對比"):
-                    # 將新指標註冊進資料庫
                     st.session_state.custom_indicators[final_name] = selected_item['code']
-                    # 自動勾選此新指標，讓它立刻在下方繪製呈現！
                     if final_name not in st.session_state.selected_indicators_list:
                         st.session_state.selected_indicators_list.append(final_name)
                     st.success(f"✅ 成功將【{final_name}】加入圖表對比！")
@@ -349,7 +358,6 @@ elif app_mode == "📊 全球總體經濟數據 (Yahoo Finance)":
     col_s1, col_s2, col_s3, col_s4 = st.columns([2, 1, 1, 1])
     
     valid_options = list(st.session_state.custom_indicators.keys())
-    # 確保 selected_indicators_list 中的項目都存在於 valid_options 中
     st.session_state.selected_indicators_list = [k for k in st.session_state.selected_indicators_list if k in valid_options]
 
     with col_s1:
@@ -358,7 +366,6 @@ elif app_mode == "📊 全球總體經濟數據 (Yahoo Finance)":
             valid_options,
             default=st.session_state.selected_indicators_list
         )
-        # 同步更新 session state 中的已選清單
         st.session_state.selected_indicators_list = selected_indicators
 
     with col_s2:
@@ -385,7 +392,6 @@ elif app_mode == "📊 全球總體經濟數據 (Yahoo Finance)":
                     if not s_df.empty:
                         series = s_df.set_index('Date')[code]
                         
-                        # 依據選單選項即時轉化計算
                         if calc_mode == "年增率 (YoY %)":
                             processed = series.pct_change(252) * 100
                         elif calc_mode == "月/日增額 (Diff)":
@@ -394,7 +400,7 @@ elif app_mode == "📊 全球總體經濟數據 (Yahoo Finance)":
                             processed = series
                             
                         res_df = processed.to_frame(name=ind_name).reset_index()
-                        res_df = res_df.dropna().tail(60) # 擷取最近 60 個交易日
+                        res_df = res_df.dropna().tail(60)
                         
                         if combined_df.empty:
                             combined_df = res_df
