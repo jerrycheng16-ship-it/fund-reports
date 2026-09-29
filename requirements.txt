@@ -1,7 +1,7 @@
 streamlit
-openai
-feedparser
 pandas
-pandas-datareader
 plotly
-yfinance
+feedparser
+openai
+yfinance>=0.2.38
+requests
