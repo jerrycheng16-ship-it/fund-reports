@@ -46,7 +46,7 @@ with st.sidebar:
     )
 
 # ---------------------------------------------------------
-# 3. 工具函數 (Qwen API & FRED 免套件極速載入)
+# 3. 工具函數
 # ---------------------------------------------------------
 def call_qwen_api(messages_list):
     if not api_key:
@@ -79,7 +79,7 @@ def clean_html(raw_html):
     cleanr = re.compile('<.*?>')
     return re.sub(cleanr, '', raw_html)
 
-# 預設經典 FRED 代碼對照字典
+# 預設經典 FRED 代碼與處理方式
 DEFAULT_FRED_INDICATORS = {
     "美國 核心 PCE (Core PCE YoY %)": {"code": "PCEPILFE", "calc": "pct_change_12m"},
     "美國 聯邦基金利率 (Fed Funds Rate %)": {"code": "FEDFUNDS", "calc": "raw"},
@@ -287,7 +287,8 @@ elif app_mode == "📊 全球總體經濟數據 (FRED)":
     st.header("📊 全球總體經濟數據庫與智慧 FRED 代碼搜尋")
     st.caption("支援自然語言搜尋 FRED Series ID，可選擇 Level/YoY/Diff 轉化方式，並結合 Plotly 雙 Y 軸動態圖表與線上編輯器！")
 
-    if "custom_indicators" not in st.session_state:
+    # 檢測與修正舊 session_state 快取
+    if "custom_indicators" not in st.session_state or not isinstance(st.session_state.custom_indicators.get("美國 核心 PCE (Core PCE YoY %)"), dict):
         st.session_state.custom_indicators = DEFAULT_FRED_INDICATORS.copy()
 
     # 1. AI 智慧搜尋區塊
@@ -341,11 +342,17 @@ elif app_mode == "📊 全球總體經濟數據 (FRED)":
     # 2. 選擇指標與雙 Y 軸設定
     st.markdown("---")
     col_s1, col_s2, col_s3 = st.columns([2, 1, 1])
+    
+    valid_options = list(st.session_state.custom_indicators.keys())
+    default_selected = [k for k in ["美國 核心 PCE (Core PCE YoY %)", "美國 聯邦基金利率 (Fed Funds Rate %)"] if k in valid_options]
+    if not default_selected and valid_options:
+        default_selected = [valid_options[0]]
+
     with col_s1:
         selected_indicators = st.multiselect(
             "選擇欲比較的總經指標：",
-            list(st.session_state.custom_indicators.keys()),
-            default=["美國 核心 PCE (Core PCE YoY %)", "美國 聯邦基金利率 (Fed Funds Rate %)"]
+            valid_options,
+            default=default_selected
         )
     with col_s2:
         use_secondary_y = st.checkbox("開啟雙 Y 軸顯示 (對比不同單位數據)", value=True)
@@ -358,28 +365,35 @@ elif app_mode == "📊 全球總體經濟數據 (FRED)":
         combined_df = pd.DataFrame()
         with st.spinner("正在連線 FRED 載入數據並處理 Level / YoY 轉換..."):
             for ind_name in selected_indicators:
-                cfg = st.session_state.custom_indicators[ind_name]
-                code = cfg["code"] if isinstance(cfg, dict) else cfg
-                calc = cfg.get("calc", "raw") if isinstance(cfg, dict) else "raw"
+                cfg = st.session_state.custom_indicators.get(ind_name, {})
                 
-                s_df = fetch_fred_csv_direct(code)
-                if not s_df.empty:
-                    series = s_df.set_index('DATE')[code]
-                    
-                    if calc == "pct_change_12m":
-                        processed = series.pct_change(12) * 100
-                    elif calc == "diff_1m":
-                        processed = series.diff()
-                    else:
-                        processed = series
+                # 相容處理：舊格式為單純字串，新格式為字典
+                if isinstance(cfg, str):
+                    code = cfg
+                    calc = "raw"
+                else:
+                    code = cfg.get("code", "")
+                    calc = cfg.get("calc", "raw")
+                
+                if code:
+                    s_df = fetch_fred_csv_direct(code)
+                    if not s_df.empty:
+                        series = s_df.set_index('DATE')[code]
                         
-                    res_df = processed.to_frame(name=ind_name).reset_index()
-                    res_df = res_df.tail(24)
-                    
-                    if combined_df.empty:
-                        combined_df = res_df
-                    else:
-                        combined_df = pd.merge(combined_df, res_df, on='DATE', how='outer')
+                        if calc == "pct_change_12m":
+                            processed = series.pct_change(12) * 100
+                        elif calc == "diff_1m":
+                            processed = series.diff()
+                        else:
+                            processed = series
+                            
+                        res_df = processed.to_frame(name=ind_name).reset_index()
+                        res_df = res_df.tail(24) # 顯示最近 24 個時間點
+                        
+                        if combined_df.empty:
+                            combined_df = res_df
+                        else:
+                            combined_df = pd.merge(combined_df, res_df, on='DATE', how='outer')
 
         if not combined_df.empty:
             combined_df = combined_df.sort_values('DATE')
@@ -438,6 +452,8 @@ elif app_mode == "📊 全球總體經濟數據 (FRED)":
 
                 st.subheader("📈 總經趨勢雙 Y 軸動態圖表")
                 st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.error("⚠️ 無法取得選定指標的數據，請重試或點選紅框標籤（X）刪除重新選擇！")
 
 # ---------------------------------------------------------
 # 模組三：基金 / ETF 交易決策評估
