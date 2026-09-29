@@ -4,4 +4,3 @@ feedparser
 pandas
 pandas-datareader
 plotly
-yfinance
