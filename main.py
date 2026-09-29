@@ -35,7 +35,7 @@ st.caption("自動彙整實時總經新聞、Yahoo / FRED 雙資料源動態連�
 # 2. 側邊欄選單
 # ---------------------------------------------------------
 with st.sidebar:
-    st.header("⚙️️ 功能選單")
+    st.header("⚙️ 功能選單")
     
     if api_key:
         st.success("🔒 API Key 已由系統安全載入")
@@ -102,7 +102,10 @@ def search_symbol_by_llm(keyword):
 你是一個精通全球金融市場（Yahoo Finance 與 FRED 數據庫）的總經專家。
 使用者輸入的自然語言關鍵字為："{keyword}"
 
-請提供 3 個最精準的資料代碼。若屬總經指標（如 GDP, CPI, PCE, 失業率），請優先提供 FRED Series ID（如 GDPC1, CPIAUCSL）；若屬市場指數或資產，提供 Yahoo Ticker。
+請提供 3 個最精準的資料代碼。
+注意：
+1. 若屬總經指標（如 GDP, CPI, PCE, 失業率, 貨幣供給 M2），請務必提供 FRED 正確 Series ID（例如 GDP 提供 GDPC1、CPI 提供 CPIAUCSL，嚴禁寫成無效的 GDP 或 $GDP）。
+2. 若屬市場指數或資產，提供 Yahoo Ticker（如 ^TNX, ^GSPC, TSLA）。
 
 請嚴格以 JSON 陣列格式輸出，不要加任何多餘說明：
 [
@@ -124,36 +127,49 @@ def search_symbol_by_llm(keyword):
 
 @st.cache_data(ttl=3600)
 def fetch_smart_data(symbol):
-    """智慧雙資料源下載：優先嘗試 Yahoo Finance，無數據時自動無縫切換 FRED 免費 CSV"""
-    # 1. 嘗試 Yahoo Finance (yfinance)
-    try:
-        ticker = yf.Ticker(symbol)
-        df = ticker.history(period="3y")
-        if not df.empty and len(df) > 5:
-            df = df.reset_index()
-            val_col = 'Close' if 'Close' in df.columns else df.columns[1]
-            df['Date'] = pd.to_datetime(df['Date']).dt.tz_localize(None)
-            df[symbol] = pd.to_numeric(df[val_col], errors='coerce')
-            df = df[['Date', symbol]].dropna().sort_values('Date')
-            return df
-    except Exception:
-        pass
+    """智慧雙資料源下載：清理代碼後，自動切換 FRED CSV 與 Yahoo Finance"""
+    raw_code = str(symbol).strip().replace("$", "")
+    
+    # 特殊別名轉指 FRED 標準代碼
+    fred_mapping = {
+        "GDP": "GDPC1",
+        "CPI": "CPIAUCSL",
+        "PCE": "PCEPILFE",
+        "UNRATE": "UNRATE"
+    }
+    
+    clean_code = fred_mapping.get(raw_code.upper(), raw_code)
 
-    # 2. 自動切換至 FRED 免費 CSV API
-    clean_code = symbol.replace("^", "").strip()
-    fred_url = f"https://fred.stlouisfed.org/graph/fredgraph.csv?id={clean_code}"
+    # 1. 優先嘗試 FRED 免費 CSV (針對總經代碼，如 GDPC1, PCEPILFE, CPIAUCSL 等)
+    fred_url = f"https://fred.stlouisfed.org/graph/fredgraph.csv?id={clean_code.replace('^', '')}"
     try:
         req = urllib.request.Request(
             fred_url, 
             headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36'}
         )
-        with urllib.request.urlopen(req, timeout=10) as response:
+        with urllib.request.urlopen(req, timeout=8) as response:
             csv_data = response.read()
             
         df = pd.read_csv(io.BytesIO(csv_data))
         if not df.empty and 'DATE' in df.columns:
             df['Date'] = pd.to_datetime(df['DATE'], errors='coerce')
-            df[symbol] = pd.to_numeric(df[clean_code], errors='coerce')
+            val_col = [c for c in df.columns if c != 'DATE'][0]
+            df[symbol] = pd.to_numeric(df[val_col], errors='coerce')
+            df = df[['Date', symbol]].dropna().sort_values('Date')
+            if len(df) > 5:
+                return df
+    except Exception:
+        pass
+
+    # 2. 嘗試 Yahoo Finance (yfinance)
+    try:
+        ticker = yf.Ticker(raw_code)
+        df = ticker.history(period="2y")
+        if not df.empty and len(df) > 5:
+            df = df.reset_index()
+            val_col = 'Close' if 'Close' in df.columns else df.columns[1]
+            df['Date'] = pd.to_datetime(df['Date']).dt.tz_localize(None)
+            df[symbol] = pd.to_numeric(df[val_col], errors='coerce')
             df = df[['Date', symbol]].dropna().sort_values('Date')
             return df
     except Exception:
@@ -227,7 +243,6 @@ if app_mode == "📰 每日要聞與總經月報":
 
 ### 2. 霍爾木茲海峽航運漸復與油價拉回：布蘭特原油滑落至 $102 區域
 **中東地緣溢價獲利回吐**：隨著伊朗與美國在白宮峰會後的非正式溝通管道保持運作，且霍爾木茲海峽部分商業航運秩序逐步恢復，國際原油期貨價格持續自高點回落。**布蘭特原油（Brent）**回落至每桶 **$102.50** 附近，**西德州原油（WTI）**跌破 **$91.80**。
-**滯脹恐慌降溫，但黏性通膨猶存**：油價自百元高點連續拉回減輕了市場對「極端滯脹（Stagflation）」的即時恐慌，但華爾街分析指出，隨著 Q4 進入北半球冬季能源需求旺季，能源成本傳導至 CPI 核心項目的滯後效應仍是 **Fed** 難以轉鴿的主因。
 ==================
 
 請開始編寫今日的 3 ~ 4 點每日要聞：
@@ -323,7 +338,7 @@ if app_mode == "📰 每日要聞與總經月報":
                 )
 
 # ---------------------------------------------------------
-# 模組二：全球總體經濟數據 (yfinance & FRED 雙資料源 + Plotly 雙 Y 軸圖)
+# 模組二：全球總體經濟數據 (yfinance & FRED 智慧雙資料源 + Plotly 雙 Y 軸圖)
 # ---------------------------------------------------------
 elif app_mode == "📊 全球總體經濟數據 (Yahoo & FRED)":
     st.header("📊 全球總體經濟與市場數據庫 (Yahoo & FRED 智慧雙資料源)")
@@ -414,7 +429,6 @@ elif app_mode == "📊 全球總體經濟數據 (Yahoo & FRED)":
                     if not s_df.empty:
                         series = s_df.set_index('Date')[code]
                         
-                        # 判斷資料頻率並轉化
                         if calc_mode == "年增率 (YoY %)":
                             shift_n = 4 if len(series) < 50 else (12 if len(series) < 300 else 252)
                             processed = series.pct_change(shift_n) * 100
@@ -444,7 +458,6 @@ elif app_mode == "📊 全球總體經濟數據 (Yahoo & FRED)":
             edited_df = st.data_editor(
                 display_df,
                 num_rows="dynamic",
-                use_container_width=True,
                 key="macro_editor"
             )
 
@@ -600,7 +613,7 @@ elif app_mode == "🎯 基金 / ETF 交易決策評估":
 （結合最新新聞數據與基本面，詳述此資產當前面臨的利多與利空變數，嚴禁出現 XX 佔位符）
 
 ### 三、買賣方向 ({action_type}) 可行性評估與風控/停損策略
-（針對擬執行的 {action_type} 方向，给出一明確的邏輯支撐、部位規模建議、停損點與停利區間）
+（針對擬執行的 {action_type} 方向，給出明確的邏輯支撐、部位規模建議、停損點與停利區間）
 """
             with st.spinner("🤖 Qwen 分析師正在編製獨立結構表格與撰寫評估報告..."):
                 report, err = call_qwen_api([{"role": "user", "content": prompt}])
