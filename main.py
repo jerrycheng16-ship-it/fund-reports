@@ -79,7 +79,7 @@ def clean_html(raw_html):
     cleanr = re.compile('<.*?>')
     return re.sub(cleanr, '', raw_html)
 
-# 預設經典 FRED 代碼與處理方式
+# 預設經典 FRED 代碼對照表
 DEFAULT_FRED_INDICATORS = {
     "美國 核心 PCE (Core PCE YoY %)": {"code": "PCEPILFE", "calc": "pct_change_12m"},
     "美國 聯邦基金利率 (Fed Funds Rate %)": {"code": "FEDFUNDS", "calc": "raw"},
@@ -287,9 +287,12 @@ elif app_mode == "📊 全球總體經濟數據 (FRED)":
     st.header("📊 全球總體經濟數據庫與智慧 FRED 代碼搜尋")
     st.caption("支援自然語言搜尋 FRED Series ID，可選擇 Level/YoY/Diff 轉化方式，並結合 Plotly 雙 Y 軸動態圖表與線上編輯器！")
 
-    # 檢測與修正舊 session_state 快取
-    if "custom_indicators" not in st.session_state or not isinstance(st.session_state.custom_indicators.get("美國 核心 PCE (Core PCE YoY %)"), dict):
+    # 初始化自訂指標庫與選取陣列
+    if "custom_indicators" not in st.session_state:
         st.session_state.custom_indicators = DEFAULT_FRED_INDICATORS.copy()
+        
+    if "selected_indicators_list" not in st.session_state:
+        st.session_state.selected_indicators_list = ["美國 核心 PCE (Core PCE YoY %)", "美國 聯邦基金利率 (Fed Funds Rate %)"]
 
     # 1. AI 智慧搜尋區塊
     with st.expander("🔍 智慧搜尋 FRED 代碼 / 新增自訂指標", expanded=True):
@@ -336,6 +339,9 @@ elif app_mode == "📊 全球總體經濟數據 (FRED)":
                         "code": selected_item['code'],
                         "calc": calc_map[final_calc]
                     }
+                    # 直接加入到選擇陣列中，確保多選框同步更新
+                    if final_name not in st.session_state.selected_indicators_list:
+                        st.session_state.selected_indicators_list.append(final_name)
                     st.success(f"✅ 成功新增指標：{final_name} ({selected_item['code']})")
                     st.rerun()
 
@@ -344,16 +350,19 @@ elif app_mode == "📊 全球總體經濟數據 (FRED)":
     col_s1, col_s2, col_s3 = st.columns([2, 1, 1])
     
     valid_options = list(st.session_state.custom_indicators.keys())
-    default_selected = [k for k in ["美國 核心 PCE (Core PCE YoY %)", "美國 聯邦基金利率 (Fed Funds Rate %)"] if k in valid_options]
-    if not default_selected and valid_options:
-        default_selected = [valid_options[0]]
+    # 確保選取的項目均包含在有效選項內
+    st.session_state.selected_indicators_list = [k for k in st.session_state.selected_indicators_list if k in valid_options]
 
     with col_s1:
         selected_indicators = st.multiselect(
             "選擇欲比較的總經指標：",
             valid_options,
-            default=default_selected
+            default=st.session_state.selected_indicators_list,
+            key="indicator_multiselect"
         )
+        # 同步更新 session state
+        st.session_state.selected_indicators_list = selected_indicators
+
     with col_s2:
         use_secondary_y = st.checkbox("開啟雙 Y 軸顯示 (對比不同單位數據)", value=True)
     with col_s3:
@@ -367,7 +376,6 @@ elif app_mode == "📊 全球總體經濟數據 (FRED)":
             for ind_name in selected_indicators:
                 cfg = st.session_state.custom_indicators.get(ind_name, {})
                 
-                # 相容處理：舊格式為單純字串，新格式為字典
                 if isinstance(cfg, str):
                     code = cfg
                     calc = "raw"
@@ -380,15 +388,19 @@ elif app_mode == "📊 全球總體經濟數據 (FRED)":
                     if not s_df.empty:
                         series = s_df.set_index('DATE')[code]
                         
+                        # 處理轉換（先抓較多歷史數據，避免 pct_change(12) 變為全 NaN）
                         if calc == "pct_change_12m":
                             processed = series.pct_change(12) * 100
+                        elif calc == "pct_change_1m":
+                            processed = series.pct_change(1) * 100
                         elif calc == "diff_1m":
                             processed = series.diff()
                         else:
                             processed = series
                             
                         res_df = processed.to_frame(name=ind_name).reset_index()
-                        res_df = res_df.tail(24) # 顯示最近 24 個時間點
+                        # 剔除計算產生的前端空值後取最新 24 筆
+                        res_df = res_df.dropna().tail(24)
                         
                         if combined_df.empty:
                             combined_df = res_df
@@ -397,6 +409,9 @@ elif app_mode == "📊 全球總體經濟數據 (FRED)":
 
         if not combined_df.empty:
             combined_df = combined_df.sort_values('DATE')
+            # 填補不同發布頻率產生的空值（如季資料對齊月資料）
+            combined_df = combined_df.ffill().bfill()
+            
             combined_df['日期 (YYYY-MM-DD)'] = combined_df['DATE'].dt.strftime('%Y-%m-%d')
             display_cols = ['日期 (YYYY-MM-DD)'] + [c for c in combined_df.columns if c not in ['DATE', '日期 (YYYY-MM-DD)']]
             display_df = combined_df[display_cols].copy()
