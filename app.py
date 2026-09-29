@@ -1,13 +1,12 @@
 import os
 import time
 import urllib.parse
-
 import feedparser
 import streamlit as st
 from openai import OpenAI
 
 # =====================================================
-# 基本設定
+# 頁面設定
 # =====================================================
 
 st.set_page_config(
@@ -20,11 +19,9 @@ st.set_page_config(
 # API KEY
 # =====================================================
 
-api_key = ""
-
 try:
     api_key = st.secrets["DASHSCOPE_API_KEY"]
-except:
+except Exception:
     api_key = os.getenv("DASHSCOPE_API_KEY", "")
 
 # =====================================================
@@ -38,7 +35,7 @@ if "daily_news" not in st.session_state:
     st.session_state.daily_news = ""
 
 # =====================================================
-# Qwen
+# Qwen API
 # =====================================================
 
 def generate_qwen_response(messages):
@@ -48,7 +45,7 @@ def generate_qwen_response(messages):
         base_url="https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
     )
 
-    model_list = [
+    models = [
         "qwen-plus",
         "qwen-max",
         "qwen-turbo"
@@ -56,7 +53,7 @@ def generate_qwen_response(messages):
 
     last_error = ""
 
-    for model in model_list:
+    for model in models:
 
         try:
 
@@ -84,10 +81,10 @@ def generate_qwen_response(messages):
 
 def fetch_realtime_news(query):
 
-    query = urllib.parse.quote(query)
+    encoded_query = urllib.parse.quote(query)
 
     rss_url = (
-        f"https://news.google.com/rss/search?q={query}"
+        f"https://news.google.com/rss/search?q={encoded_query}"
         "&hl=zh-TW"
         "&gl=TW"
         "&ceid=TW:zh-Hant"
@@ -97,9 +94,31 @@ def fetch_realtime_news(query):
 
         feed = feedparser.parse(rss_url)
 
-        news = []
+        news_list = []
 
-        for entry in feed.entries[:10]:
+        for entry in feed.entries[:10\]:
 
             title = entry.get("title", "")
-            summary = entry.
+            summary = entry.get("summary", "")
+            published = entry.get("published", "")
+
+            news_list.append(
+                f"""
+時間：{published}
+標題：{title}
+摘要：{summary}
+"""
+            )
+
+        if len(news_list) == 0:
+            return "無新聞資料"
+
+        return "\n".join(news_list)
+
+    except Exception as e:
+
+        return f"新聞擷取失敗：{str(e)}"
+
+# =====================================================
+# Sidebar
+# ================================
