@@ -6,10 +6,9 @@ import json
 import datetime
 from datetime import timezone, timedelta
 import urllib.parse
-import urllib.request
-import io
 import feedparser
 import pandas as pd
+import yfinance as yf
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import streamlit as st
@@ -120,34 +119,21 @@ def search_symbol_by_llm(keyword):
     return []
 
 @st.cache_data(ttl=3600)
-def fetch_yahoo_series(symbol, period="1y"):
-    """從 Yahoo Finance 免費 CSV API 穩定下載歷史價格數據"""
-    # 轉換時間範圍戳記
-    end_dt = datetime.datetime.now()
-    start_dt = end_dt - datetime.timedelta(days=730)
-    
-    period1 = int(start_dt.timestamp())
-    period2 = int(end_dt.timestamp())
-    
-    url = f"https://query1.finance.yahoo.com/v7/finance/download/{urllib.parse.quote(symbol)}?period1={period1}&period2={period2}&interval=1d&events=history&includeAdjustedClose=true"
-    
+def fetch_yahoo_series_yf(symbol):
+    """使用 yfinance 自動處理 Cookie 與 Crumb 驗證，獲取歷史數據"""
     try:
-        req = urllib.request.Request(
-            url, 
-            headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36'}
-        )
-        with urllib.request.urlopen(req, timeout=10) as response:
-            csv_data = response.read()
-            
-        df = pd.read_csv(io.BytesIO(csv_data))
-        df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
-        val_col = 'Adj Close' if 'Adj Close' in df.columns else 'Close'
-        df[symbol] = pd.to_numeric(df[val_col], errors='coerce')
-        
-        df = df[['Date', symbol]].dropna().sort_values('Date')
-        return df
+        ticker = yf.Ticker(symbol)
+        df = ticker.history(period="2y")
+        if not df.empty:
+            df = df.reset_index()
+            val_col = 'Close' if 'Close' in df.columns else df.columns[1]
+            df['Date'] = pd.to_datetime(df['Date']).dt.tz_localize(None)
+            df[symbol] = pd.to_numeric(df[val_col], errors='coerce')
+            df = df[['Date', symbol]].dropna().sort_values('Date')
+            return df
     except Exception as e:
-        return pd.DataFrame()
+        pass
+    return pd.DataFrame()
 
 # ---------------------------------------------------------
 # 模組一：每日金融市場要聞 & 歷史查詢 & 月報彙整
@@ -303,7 +289,7 @@ if app_mode == "📰 每日要聞與總經月報":
                 )
 
 # ---------------------------------------------------------
-# 模組二：全球總體經濟數據 (Yahoo Finance 資料源 + 智慧搜尋 + Plotly 雙 Y 軸圖)
+# 模組二：全球總體經濟數據 (yfinance 資料源 + 智慧搜尋 + Plotly 雙 Y 軸圖)
 # ---------------------------------------------------------
 elif app_mode == "📊 全球總體經濟數據 (Yahoo Finance)":
     st.header("📊 全球總體經濟與市場數據庫 (Yahoo Finance 資料源)")
@@ -382,20 +368,20 @@ elif app_mode == "📊 全球總體經濟數據 (Yahoo Finance)":
                 code = code_item if isinstance(code_item, str) else code_item.get("code", "")
                 
                 if code:
-                    s_df = fetch_yahoo_series(code)
+                    s_df = fetch_yahoo_series_yf(code)
                     if not s_df.empty:
                         series = s_df.set_index('Date')[code]
                         
                         # 依據選單選項即時轉化計算
                         if calc_mode == "年增率 (YoY %)":
-                            processed = series.pct_change(252) * 100 # 交易年約252日
+                            processed = series.pct_change(252) * 100
                         elif calc_mode == "月/日增額 (Diff)":
                             processed = series.diff()
                         else:
                             processed = series
                             
                         res_df = processed.to_frame(name=ind_name).reset_index()
-                        res_df = res_df.dropna().tail(60) # 擷取最近60交易日
+                        res_df = res_df.dropna().tail(60) # 擷取最近 60 個交易日
                         
                         if combined_df.empty:
                             combined_df = res_df
