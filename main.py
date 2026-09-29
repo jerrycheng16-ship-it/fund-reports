@@ -60,7 +60,7 @@ def call_qwen_api(messages_list):
             response = client.chat.completions.create(
                 model=model_name,
                 messages=messages_list,
-                temperature=0.5
+                temperature=0.4
             )
             if response and response.choices:
                 return response.choices[0].message.content, None
@@ -229,7 +229,7 @@ if app_mode == "📰 每日要聞與總經月報":
                 )
 
 # ---------------------------------------------------------
-# 模組二：基金 / ETF 交易決策評估 (表格化與全維度指標卡片)
+# 模組二：基金 / ETF 交易決策評估 (獨立分表版，防止占比複製錯誤)
 # ---------------------------------------------------------
 elif app_mode == "🎯 基金 / ETF 交易決策評估":
     st.header("🎯 基金 / ETF 投資決策與評估報告生成器")
@@ -272,7 +272,7 @@ elif app_mode == "🎯 基金 / ETF 交易決策評估":
                 lang_instruction = "每個段落請先提供「繁體中文」，隨後附上對應的「英文翻譯 (English Translation)」。"
 
             prompt = f"""
-你是一位機構級資深基金分析師與首席投資策略官。請針對標的【{fund_name}】，撰寫一份包含**結構化表格基本檔案**與**深度決策評估**的專業機構報告。
+你是一位機構級資深基金分析師與首席投資策略官。請針對標的【{fund_name}】，撰寫一份包含**分拆獨立表格基本檔案**與**深度決策評估**的專業機構報告。
 
 【基本交易資訊】：
 - 標的輸入：{fund_name}
@@ -282,7 +282,7 @@ elif app_mode == "🎯 基金 / ETF 交易決策評估":
 【即時市場新聞與數據】：
 {market_data}
 
-【撰寫格式與結構規範（請嚴格使用 Markdown 表格輸出）】：
+【撰寫格式與結構規範（請將各資料分拆為獨立 Markdown 表格，絕對不要混在一張表內）】：
 
 ### 📌 零、標的基本檔案與配置概況 (Basic Profile)
 
@@ -301,23 +301,30 @@ elif app_mode == "🎯 基金 / ETF 交易決策評估":
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
 | **總報酬率 (%)** | (數據/估計) | (數據/估計) | (數據/估計) | (數據/估計) | (數據/估計) | (數據/估計) | (數據/估計) | (數據/估計) |
 
-#### 3. 資產配置與前十大持股
-| 前十大持股 / 標的 (Top 10) | 估計權重 (%) | 主要產業分布 (Sectors) | 占比 (%) | 主要國家分布 (Geographic) | 占比 (%) |
-| :--- | :--- | :--- | :--- | :--- | :--- |
-| 1. (持股1) | (權重%) | (產業1) | (%) | (國家1) | (%) |
-| 2. (持股2) | (權重%) | (產業2) | (%) | (國家2) | (%) |
-| 3. (持股3) | (權重%) | (產業3) | (%) | (國家3) | (%) |
-| 4. (持股4) | (權重%) | (產業4) | (%) | (國家4) | (%) |
-| ...至第 10 大持股 | ... | ... | ... | ... | ... |
+#### 3. 前十大持股 (Top 10 Holdings)
+| 排序 | 持股 / 標的名稱 | 估計權重 (%) |
+| :--- | :--- | :--- |
+| 1 | (持股名稱 1) | (權重 1%) |
+| 2 | (持股名稱 2) | (權重 2%) |
+| ... | ... | ... |
+| 10 | (持股名稱 10) | (權重 10%) |
 
-#### 4. 關鍵風險與固定收益專屬指標 (若屬債券/固定收益型基金，必須填寫此表)
+#### 4. 主要產業與國家配置分布 (Sectors & Geographic Allocation)
+| 主要產業 (Sectors) | 占比 (%) | 主要國家/地區 (Geographic) | 占比 (%) |
+| :--- | :--- | :--- | :--- |
+| (產業 1，如：政府債券 / 科技) | (%) | (國家 1，如：美國) | (%) |
+| (產業 2，如：金融債 / 金融) | (%) | (國家 2，如：巴西) | (%) |
+| (產業 3，如：公司債 / 通訊) | (%) | (國家 3，如：墨西哥) | (%) |
+| (產業 4) | (%) | (國家 4) | (%) |
+
+#### 5. 關鍵風險與固定收益專屬指標 (若屬債券/固定收益型基金，必須填寫此表)
 | 專屬風險指標 | 內容 / 數值 | 說明 |
 | :--- | :--- | :--- |
 | **修正存續期間 (Modified Duration)** | (例如：6.8 年) | （對利率變動之價格敏感度） |
 | **30 天 SEC 殖利率 / 到期殖利率 (Yield)** | (例如：4.85%) | （最新年化收益率） |
 | **平均信用評級 (Credit Rating)** | (例如：AA級 / AAA級) | （信用風險評估） |
 | **加權平均到期日 (Weighted Avg Maturity)**| (例如：8.5 年) | （債券平均到期年限） |
-*(註：若本標的為股票型，請將本表標題改為「股票型關鍵評價指標」，項目替換為 P/E 本益比、P/B 股淨比、股息殖利率 Dividend Yield)*
+*(註：若本標的為股票型，請將本表欄位替換為 P/E 本益比、P/B 股淨比、股息殖利率 Dividend Yield)*
 
 ---
 
@@ -330,7 +337,7 @@ elif app_mode == "🎯 基金 / ETF 交易決策評估":
 ### 三、買賣方向 ({action_type}) 可行性評估與風控/停損策略
 （針對擬執行的 {action_type} 方向，給出明確的邏輯支撐、部位規模建議、停損點與停利區間）
 """
-            with st.spinner("🤖 Qwen 分析師正在編製結構化表格與撰寫評估報告..."):
+            with st.spinner("🤖 Qwen 分析師正在編製獨立結構表格與撰寫評估報告..."):
                 report, err = call_qwen_api([{"role": "user", "content": prompt}])
                 if report:
                     st.session_state.fund_report = report
@@ -339,7 +346,7 @@ elif app_mode == "🎯 基金 / ETF 交易決策評估":
                         "action_type": action_type,
                         "prompt": prompt
                     }
-                    st.success("✅ 表格化基本檔案與決策報告生成完畢！")
+                    st.success("✅ 獨立表格化基本檔案與決策報告生成完畢！")
                 else:
                     st.error(f"❌ 生成失敗: {err}")
 
@@ -357,7 +364,7 @@ elif app_mode == "🎯 基金 / ETF 交易決策評估":
 
         st.markdown("---")
         st.subheader("🔄 報告優化與對話式微調")
-        user_feedback = st.text_area("輸入對報告的修改需求或補充意見：", placeholder="例如：請修正 MTD 績效細節、或補充分析其 Modified Duration 對央行升/降息的敏感度...")
+        user_feedback = st.text_area("輸入對報告的修改需求或補充意見：", placeholder="例如：請修正持股占比細節，或調整產業分布資料...")
         
         if st.button("✏️ 根據意見重新修正報告"):
             if not user_feedback.strip():
@@ -367,7 +374,7 @@ elif app_mode == "🎯 基金 / ETF 交易決策評估":
                     refine_messages = [
                         {"role": "user", "content": st.session_state.fund_prompt_info.get("prompt")},
                         {"role": "assistant", "content": st.session_state.fund_report},
-                        {"role": "user", "content": f"請根據以下意見修改上面的報告，嚴格維持 Markdown 表格結構與完整文字分析（嚴禁 XX 佔位符）：\n\n【修改意見】：{user_feedback}"}
+                        {"role": "user", "content": f"請根據以下意見修改上面的報告，嚴格維持獨立 Markdown 表格結構與完整文字分析（嚴禁 XX 佔位符）：\n\n【修改意見】：{user_feedback}"}
                     ]
                     updated_report, err = call_qwen_api(refine_messages)
                     if updated_report:
