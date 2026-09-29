@@ -229,7 +229,7 @@ if app_mode == "📰 每日要聞與總經月報":
                 )
 
 # ---------------------------------------------------------
-# 模組二：基金 / ETF 交易決策評估 (包含完整標的 Basic Profile)
+# 模組二：基金 / ETF 交易決策評估 (表格化與全維度指標卡片)
 # ---------------------------------------------------------
 elif app_mode == "🎯 基金 / ETF 交易決策評估":
     st.header("🎯 基金 / ETF 投資決策與評估報告生成器")
@@ -251,7 +251,7 @@ elif app_mode == "🎯 基金 / ETF 交易決策評估":
         if not fund_name.strip():
             st.warning("⚠️ 請輸入標的名稱或代碼！")
         else:
-            with st.spinner(f"正在爬取 {fund_name} 相關實時新聞與基本面數據..."):
+            with st.spinner(f"正在抓取 {fund_name} 最新資料與基本面..."):
                 encoded_query = urllib.parse.quote(fund_name)
                 rss_url = f"https://news.google.com/rss/search?q={encoded_query}+OR+聯準會+OR+美債殖利率+OR+通膨&hl=zh-TW&gl=TW&ceid=TW:zh-Hant"
                 feed = feedparser.parse(rss_url)
@@ -272,7 +272,7 @@ elif app_mode == "🎯 基金 / ETF 交易決策評估":
                 lang_instruction = "每個段落請先提供「繁體中文」，隨後附上對應的「英文翻譯 (English Translation)」。"
 
             prompt = f"""
-你是一位機構級資深基金分析師與首席投資策略官。請針對標的【{fund_name}】，撰寫一份包含**完整標的檔案卡片**與**深度決策評估**的機構級報告。
+你是一位機構級資深基金分析師與首席投資策略官。請針對標的【{fund_name}】，撰寫一份包含**結構化表格基本檔案**與**深度決策評估**的專業機構報告。
 
 【基本交易資訊】：
 - 標的輸入：{fund_name}
@@ -282,31 +282,55 @@ elif app_mode == "🎯 基金 / ETF 交易決策評估":
 【即時市場新聞與數據】：
 {market_data}
 
-【撰寫格式與結構規範】：
+【撰寫格式與結構規範（請嚴格使用 Markdown 表格輸出）】：
 
-### 📌 零、標的基本檔案與配置概況 (Basic Profile & Portfolio Allocation)
-（請務必依據標的【{fund_name}】的公開發行資料精準整理並整理出以下項目；如為債券型/單一股票，請於產業/持股做相應專業說明，絕不要出現 "XX" 佔位符）
-- **基金/ETF 中文全稱**：
-- **基金/ETF 英文全稱**：
-- **追蹤指數 / 標的屬性**：
-- **基金規模 (AUM)**：
-- **前十大持股 (Top 10 Holdings)**：(請表列標的與預估權重)
-- **產業分布 (Sector Breakdown)**：(請表列主要產業占比)
-- **國家/區域分布 (Geographic Allocation)**：(請表列主要投資國家占比)
-- **歷史績效表現 (Performance Track Record)**：(包含近 1 年、近 3 年或今年以來 YTD 表現)
+### 📌 零、標的基本檔案與配置概況 (Basic Profile)
+
+#### 1. 基金 / ETF 基本資訊
+| 項目 | 內容/數值 |
+| :--- | :--- |
+| **基金/ETF 中文全稱** | (正確中文名稱) |
+| **基金/ETF 英文全稱** | (正確英文全稱) |
+| **交易所 / 股票代碼** | (Ticker / Code) |
+| **追蹤指數 / 標的屬性** | (Benchmark Index / Asset Class) |
+| **基金規模 (AUM)** | (最新預估規模，如 350 億美元) |
+| **經理費 / 總內扣費用 (TER)**| (Expense Ratio) |
+
+#### 2. 歷史績效表現 (Performance Track Record)
+| 期間 | MTD | YTD | 1M | 3M | 6M | 1Yr | 3Yr (年化) | 5Yr (年化) |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| **總報酬率 (%)** | (數據/估計) | (數據/估計) | (數據/估計) | (數據/估計) | (數據/估計) | (數據/估計) | (數據/估計) | (數據/估計) |
+
+#### 3. 資產配置與前十大持股
+| 前十大持股 / 標的 (Top 10) | 估計權重 (%) | 主要產業分布 (Sectors) | 占比 (%) | 主要國家分布 (Geographic) | 占比 (%) |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| 1. (持股1) | (權重%) | (產業1) | (%) | (國家1) | (%) |
+| 2. (持股2) | (權重%) | (產業2) | (%) | (國家2) | (%) |
+| 3. (持股3) | (權重%) | (產業3) | (%) | (國家3) | (%) |
+| 4. (持股4) | (權重%) | (產業4) | (%) | (國家4) | (%) |
+| ...至第 10 大持股 | ... | ... | ... | ... | ... |
+
+#### 4. 關鍵風險與固定收益專屬指標 (若屬債券/固定收益型基金，必須填寫此表)
+| 專屬風險指標 | 內容 / 數值 | 說明 |
+| :--- | :--- | :--- |
+| **修正存續期間 (Modified Duration)** | (例如：6.8 年) | （對利率變動之價格敏感度） |
+| **30 天 SEC 殖利率 / 到期殖利率 (Yield)** | (例如：4.85%) | （最新年化收益率） |
+| **平均信用評級 (Credit Rating)** | (例如：AA級 / AAA級) | （信用風險評估） |
+| **加權平均到期日 (Weighted Avg Maturity)**| (例如：8.5 年) | （債券平均到期年限） |
+*(註：若本標的為股票型，請將本表標題改為「股票型關鍵評價指標」，項目替換為 P/E 本益比、P/B 股淨比、股息殖利率 Dividend Yield)*
 
 ---
 
 ### 一、當前總體經濟環境與市場脈絡分析
-（深入剖析當前利率環境、央行政策與宏觀經濟變數對此資產類別的影響）
+（深入剖析當前利率環境、央行政策與宏觀經濟變數對此資產類別的影響，文字需豐富具體）
 
 ### 二、標的屬性與最新市場衝擊評估 ({fund_name})
-（結合最新新聞數據，詳述此資產當前面臨的利多與利空變數）
+（結合最新新聞數據與基本面，詳述此資產當前面臨的利多與利空變數，嚴禁出現 XX 佔位符）
 
 ### 三、買賣方向 ({action_type}) 可行性評估與風控/停損策略
 （針對擬執行的 {action_type} 方向，給出明確的邏輯支撐、部位規模建議、停損點與停利區間）
 """
-            with st.spinner("🤖 Qwen 分析師正在整理基金持股檔案與撰寫評估報告..."):
+            with st.spinner("🤖 Qwen 分析師正在編製結構化表格與撰寫評估報告..."):
                 report, err = call_qwen_api([{"role": "user", "content": prompt}])
                 if report:
                     st.session_state.fund_report = report
@@ -315,14 +339,14 @@ elif app_mode == "🎯 基金 / ETF 交易決策評估":
                         "action_type": action_type,
                         "prompt": prompt
                     }
-                    st.success("✅ 包含基本檔案與持股配置的決策報告生成完畢！")
+                    st.success("✅ 表格化基本檔案與決策報告生成完畢！")
                 else:
                     st.error(f"❌ 生成失敗: {err}")
 
     # 顯示個案報告與微調區塊
     if st.session_state.fund_report:
         st.markdown("---")
-        st.subheader(f"📈 《{st.session_state.fund_prompt_info.get('fund_name')}》- 標的檔案與 {st.session_state.fund_prompt_info.get('action_type')} 決策評估報告")
+        st.subheader(f"📈 《{st.session_state.fund_prompt_info.get('fund_name')}》- 標的表格檔案與 {st.session_state.fund_prompt_info.get('action_type')} 決策評估報告")
         st.markdown(st.session_state.fund_report)
         
         st.download_button(
@@ -333,7 +357,7 @@ elif app_mode == "🎯 基金 / ETF 交易決策評估":
 
         st.markdown("---")
         st.subheader("🔄 報告優化與對話式微調")
-        user_feedback = st.text_area("輸入對報告的修改需求或補充意見：", placeholder="例如：請針對前三大持股的權重變化進行更詳細的說明...")
+        user_feedback = st.text_area("輸入對報告的修改需求或補充意見：", placeholder="例如：請修正 MTD 績效細節、或補充分析其 Modified Duration 對央行升/降息的敏感度...")
         
         if st.button("✏️ 根據意見重新修正報告"):
             if not user_feedback.strip():
@@ -343,7 +367,7 @@ elif app_mode == "🎯 基金 / ETF 交易決策評估":
                     refine_messages = [
                         {"role": "user", "content": st.session_state.fund_prompt_info.get("prompt")},
                         {"role": "assistant", "content": st.session_state.fund_report},
-                        {"role": "user", "content": f"請根據以下意見修改上面的報告，保持標的基本檔案結構與充實的文字分析（嚴禁 XX 佔位符）：\n\n【修改意見】：{user_feedback}"}
+                        {"role": "user", "content": f"請根據以下意見修改上面的報告，嚴格維持 Markdown 表格結構與完整文字分析（嚴禁 XX 佔位符）：\n\n【修改意見】：{user_feedback}"}
                     ]
                     updated_report, err = call_qwen_api(refine_messages)
                     if updated_report:
