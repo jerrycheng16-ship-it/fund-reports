@@ -1,51 +1,69 @@
 import os
+import urllib.parse
+import feedparser
 import streamlit as st
 from openai import OpenAI
 
+# =====================================================
+# 頁面設定
+# =====================================================
+
 st.set_page_config(
-    page_title="基金分析測試",
-    page_icon="📊"
+    page_title="AI基金投資分析平台",
+    page_icon="📊",
+    layout="wide"
 )
 
-st.title("📊 Qwen API 測試")
+# =====================================================
+# API KEY
+# =====================================================
 
 try:
-    api_key = st.secrets["DASHSCOPE_API_KEY"]
+    API_KEY = st.secrets["DASHSCOPE_API_KEY"]
 except Exception:
-    api_key = os.getenv("DASHSCOPE_API_KEY", "")
+    API_KEY = os.getenv("DASHSCOPE_API_KEY", "")
 
-if not api_key:
-    st.error("找不到 DASHSCOPE_API_KEY")
-    st.stop()
+# =====================================================
+# QWEN
+# =====================================================
 
-st.success("✅ API Key 已載入")
+def generate_report(prompt):
 
-fund_name = st.text_input(
-    "基金名稱",
-    value="SPY"
-)
+    client = OpenAI(
+        api_key=API_KEY,
+        base_url="https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
+    )
 
-if st.button("測試 Qwen"):
+    response = client.chat.completions.create(
+        model="qwen-plus",
+        messages=[
+            {
+                "role": "user",
+                "content": prompt
+            }
+        ],
+        temperature=0.4
+    )
 
-    try:
+    return response.choices[0].message.content
 
-        client = OpenAI(
-            api_key=api_key,
-            base_url="https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
-        )
+# =====================================================
+# RSS新聞
+# =====================================================
 
-        response = client.chat.completions.create(
-            model="qwen-plus",
-            messages=[
-                {
-                    "role": "user",
-                    "content": f"請用繁體中文介紹 {fund_name} ETF"
-                }
-            ]
-        )
+def fetch_realtime_news(query):
 
-        st.write(response.choices[0].message.content)
+    encoded_query = urllib.parse.quote(query)
 
-    except Exception as e:
+    rss_url = (
+        f"https://news.google.com/rss/search?q={encoded_query}"
+        "&hl=zh-TW"
+        "&gl=TW"
+        "&ceid=TW:zh-Hant"
+    )
 
-        st.exception(e)
+    feed = feedparser.parse(rss_url)
+
+    news_items = []
+
+    for entry 
