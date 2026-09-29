@@ -6,6 +6,10 @@ import datetime
 from datetime import timezone, timedelta
 import urllib.parse
 import feedparser
+import pandas as pd
+import pandas_datareader.data as web
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 import streamlit as st
 from openai import OpenAI
 
@@ -13,7 +17,7 @@ from openai import OpenAI
 # 1. 頁面配置與 Secrets 安全讀取
 # ---------------------------------------------------------
 st.set_page_config(
-    page_title="AI 機構級金融研報與基金決策系統",
+    page_title="AI 機構級金融研報與總經決策系統",
     page_icon="📈",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -21,8 +25,8 @@ st.set_page_config(
 
 api_key = st.secrets.get("DASHSCOPE_API_KEY", os.environ.get("DASHSCOPE_API_KEY", ""))
 
-st.title("📈 AI 機構級金融市場研報與基金投資決策系統")
-st.caption("自動彙整實時總經新聞、歷史每日研報，並支援一鍵生成月報與單一資產交易決策評估。")
+st.title("📈 AI 機構級金融市場研報與總經決策系統")
+st.caption("自動彙整實時總經新聞、FRED 數據互動繪圖、每日研報/月報，以及資產交易決策評估。")
 
 # ---------------------------------------------------------
 # 2. 側邊欄選單
@@ -38,11 +42,11 @@ with st.sidebar:
     st.markdown("---")
     app_mode = st.radio(
         "請選擇功能模組：",
-        ["📰 每日要聞與總經月報", "🎯 基金 / ETF 交易決策評估"]
+        ["📰 每日要聞與總經月報", "📊 全球總體經濟數據 (FRED)", "🎯 基金 / ETF 交易決策評估"]
     )
 
 # ---------------------------------------------------------
-# 3. 工具函數 (Qwen API 呼叫與 HTML 標籤過濾)
+# 3. 工具函數 (Qwen API & FRED 數據下載)
 # ---------------------------------------------------------
 def call_qwen_api(messages_list):
     if not api_key:
@@ -74,6 +78,34 @@ def clean_html(raw_html):
     """清除 RSS 中的 HTML 標籤"""
     cleanr = re.compile('<.*?>')
     return re.sub(cleanr, '', raw_html)
+
+# FRED 指標對照表 (FRED Series Code & 計算方式)
+FRED_INDICATORS = {
+    "美國 GDP (YoY %)": {"code": "GDPC1", "calc": "pct_change_4q"},
+    "美國 GDP (QoQ 年化 %)": {"code": "A191RL1Q225SBEA", "calc": "raw"},
+    "美國 CPI (YoY %)": {"code": "CPIAUCSL", "calc": "pct_change_12m"},
+    "美國 核心 CPI (Core CPI YoY %)": {"code": "CPILFESL", "calc": "pct_change_12m"},
+    "美國 PCE (YoY %)": {"code": "PCEPI", "calc": "pct_change_12m"},
+    "美國 核心 PCE (Core PCE YoY %)": {"code": "PCEPILFE", "calc": "pct_change_12m"},
+    "美國 失業率 (%)": {"code": "UNRATE", "calc": "raw"},
+    "美國 非農就業人口增加 (千人)": {"code": "PAYEMS", "calc": "diff_1m"},
+    "美國 零售銷售 (Retail Sales YoY %)": {"code": "RSXFS", "calc": "pct_change_12m"},
+    "美國 ISM 製造業 PMI": {"code": "MANEMP", "calc": "raw"}, # 備用標的
+    "美國 聯邦基金利率 (Fed Funds Rate %)": {"code": "FEDFUNDS", "calc": "raw"},
+    "美國 10 年期公債殖利率 (%)": {"code": "DGS10", "calc": "raw"},
+    "美國 2 年期公債殖利率 (%)": {"code": "DGS2", "calc": "raw"},
+    "歐元區 CPI (YoY %)": {"code": "CP0000EZ19M086NEST", "calc": "pct_change_12m"},
+    "日本 CPI (YoY %)": {"code": "JPNCPIALLMINMEI", "calc": "pct_change_12m"}
+}
+
+@st.cache_data(ttl=86400) # 快取 24 小時，避免重複頻繁請求 FRED
+def fetch_fred_series(series_code, start_date, end_date):
+    try:
+        df = web.DataReader(series_code, 'fred', start_date, end_date)
+        return df
+    except Exception as e:
+        st.error(f"下載 FRED 代碼 {series_code} 失敗: {e}")
+        return pd.DataFrame()
 
 # ---------------------------------------------------------
 # 模組一：每日金融市場要聞 & 歷史查詢 & 月報彙整
@@ -229,7 +261,100 @@ if app_mode == "📰 每日要聞與總經月報":
                 )
 
 # ---------------------------------------------------------
-# 模組二：基金 / ETF 交易決策評估 (獨立分表版，防止占比複製錯誤)
+# 模組二：全球總體經濟數據 (FRED 數據與動態對比圖表)
+# ---------------------------------------------------------
+elif app_mode == "📊 全球總體經濟數據 (FRED)":
+    st.header("📊 全球總體經濟數據庫與多指標互動圖表")
+    st.caption("即時連線 FRED (Federal Reserve Economic Data) 下載重要國家總經指標，支援雙 Y 軸與多指標交叉比較。")
+
+    col_s1, col_s2, col_s3 = st.columns([2, 1, 1])
+    with col_s1:
+        selected_indicators = st.multiselect(
+            "請選擇欲比較的總經指標（可多選）：",
+            list(FRED_INDICATORS.keys()),
+            default=["美國 核心 PCE (Core PCE YoY %)", "美國 聯邦基金利率 (Fed Funds Rate %)"]
+        )
+    with col_s2:
+        start_year = st.number_input("起始年份：", min_value=1990, max_value=2026, value=2015)
+    with col_s3:
+        use_secondary_y = st.checkbox("開啟雙 Y 軸顯示 (適合單位相差較大者)", value=True)
+
+    if not selected_indicators:
+        st.warning("⚠️ 請至少選擇一項總經指標進行繪圖！")
+    else:
+        start_date = f"{start_year}-01-01"
+        end_date = datetime.datetime.now().strftime("%Y-%m-%d")
+        
+        combined_df = pd.DataFrame()
+        
+        with st.spinner("正在連線 FRED 下載數據與進行年化/轉換計算..."):
+            for ind_name in selected_indicators:
+                cfg = FRED_INDICATORS[ind_name]
+                raw_df = fetch_fred_series(cfg["code"], start_date, end_date)
+                
+                if not raw_df.empty:
+                    series = raw_df.iloc[:, 0]
+                    
+                    # 依據計算方式轉換
+                    if cfg["calc"] == "pct_change_12m":
+                        processed_series = series.pct_change(12) * 100
+                    elif cfg["calc"] == "pct_change_4q":
+                        processed_series = series.pct_change(4) * 100
+                    elif cfg["calc"] == "diff_1m":
+                        processed_series = series.diff()
+                    else:
+                        processed_series = series
+                        
+                    combined_df[ind_name] = processed_series
+
+        combined_df = combined_df.dropna(how="all")
+
+        # 使用 Plotly 繪製繪圖
+        fig = make_subplots(specs=[[{"secondary_y": True}]])
+        
+        colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', '#8c564b', '#e377c2']
+        
+        for idx, col in enumerate(combined_df.columns):
+            # 第一個指標預設放在主 Y 軸，後續若開啟雙 Y 軸則放次 Y 軸
+            is_secondary = (idx > 0 and use_secondary_y)
+            fig.add_trace(
+                go.Scatter(
+                    x=combined_df.index,
+                    y=combined_df[col],
+                    name=col,
+                    line=dict(width=2.5, color=colors[idx % len(colors)])
+                ),
+                secondary_y=is_secondary
+            )
+
+        fig.update_layout(
+            title=f"全球總經數據交叉比較 ({start_year} 年至今)",
+            hovermode="x unified",
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+            template="plotly_dark",
+            height=550
+        )
+        
+        fig.update_xaxes(title_text="日期")
+        fig.update_yaxes(title_text="主指標數值 (%) / 單位", secondary_y=False)
+        if use_secondary_y and len(selected_indicators) > 1:
+            fig.update_yaxes(title_text="對比指標數值 (%) / 單位", secondary_y=True)
+
+        st.plotly_chart(fig, use_container_width=True)
+
+        # 數據數據表格展示與下載
+        with st.expander("📥 檢視與下載數據報表"):
+            st.dataframe(combined_df.tail(24).sort_index(ascending=False), use_container_width=True)
+            csv_data = combined_df.to_csv().encode('utf-8')
+            st.download_button(
+                "📥 下載完整 CSV 數據",
+                csv_data,
+                file_name=f"FRED_Macro_Data_{start_year}_to_{datetime.datetime.now().strftime('%Y%m%d')}.csv",
+                mime="text/csv"
+            )
+
+# ---------------------------------------------------------
+# 模組三：基金 / ETF 交易決策評估
 # ---------------------------------------------------------
 elif app_mode == "🎯 基金 / ETF 交易決策評估":
     st.header("🎯 基金 / ETF 投資決策與評估報告生成器")
