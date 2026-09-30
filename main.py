@@ -176,7 +176,7 @@ def fetch_smart_data(symbol):
         except Exception:
             pass
 
-    # 2. 備用：嘗試 FRED 官方公開 CSV 捷徑（若 API Key 未設定或失敗）
+    # 2. 備用：嘗試 FRED 官方公開 CSV 捷徑
     fred_csv_url = f"https://fred.stlouisfed.org/graph/fredgraph.csv?id={clean_code.replace('^', '')}"
     try:
         req = urllib.request.Request(
@@ -318,7 +318,7 @@ if app_mode == "📰 每日要聞與總經月報":
         all_files = glob.glob("daily_reports/*.md")
         available_months = sorted(list(set([os.path.basename(f)[:7] for f in all_files])), reverse=True)
         if not available_months:
-            st.warning("⚠️️ 尚無每日研報數據。")
+            st.warning("⚠️ 尚無每日研報數據。")
         else:
             target_month = st.selectbox("選擇欲彙整的月份：", available_months)
             if st.button("🚀 生成機構級月報", type="primary"):
@@ -361,13 +361,17 @@ if app_mode == "📰 每日要聞與總經月報":
 # ---------------------------------------------------------
 elif app_mode == "📊 全球總體經濟數據 (Yahoo & FRED)":
     st.header("📊 全球總體經濟與市場數據庫 (Yahoo & FRED 智慧雙資料源)")
-    st.caption("自動連線 Yahoo Finance 與 FRED API 資料庫，支援 GDP、CPI、PCE、美債殖利率與股市指數！")
+    st.caption("自動連線 Yahoo Finance 與 FRED API 資料庫，並可針對每一個選擇的指標獨立設定資料轉換方式！")
 
     if "custom_indicators" not in st.session_state:
         st.session_state.custom_indicators = DEFAULT_INDICATORS.copy()
 
     if "selected_indicators_list" not in st.session_state:
         st.session_state.selected_indicators_list = ["美國 10 年期公債殖利率 (%)", "S&P 500 指數"]
+
+    # 初始化每個指標各自的處理方式對應字典
+    if "indicator_transforms" not in st.session_state:
+        st.session_state.indicator_transforms = {}
 
     with st.expander("🔍 智慧搜尋數據代碼 / 新增自訂指標", expanded=True):
         col_sch1, col_sch2 = st.columns([3, 1])
@@ -407,27 +411,42 @@ elif app_mode == "📊 全球總體經濟數據 (Yahoo & FRED)":
                     st.rerun()
 
     st.markdown("---")
-    col_s1, col_s2, col_s3, col_s4 = st.columns([2, 1, 1, 1])
     
     valid_options = list(st.session_state.custom_indicators.keys())
     st.session_state.selected_indicators_list = [k for k in st.session_state.selected_indicators_list if k in valid_options]
 
-    with col_s1:
-        selected_indicators = st.multiselect(
-            "選擇欲比較的市場/總經指標：",
-            valid_options,
-            default=st.session_state.selected_indicators_list
-        )
-        st.session_state.selected_indicators_list = selected_indicators
+    # 第一步：選擇欲比較的指標
+    selected_indicators = st.multiselect(
+        "選擇欲比較的市場/總經指標：",
+        valid_options,
+        default=st.session_state.selected_indicators_list
+    )
+    st.session_state.selected_indicators_list = selected_indicators
 
-    with col_s2:
-        calc_mode = st.selectbox(
-            "數據處理方式：",
-            ["原始水準 (Level/Raw)", "年增率 (YoY %)", "月/日增額 (Diff)"]
-        )
-    with col_s3:
+    # 第二步：針對每一個已選指標，獨立設定其數據處理方式
+    transform_options = ["原始水準 (Level/Raw)", "年增率 (YoY %)", "月/日增額 (Diff)"]
+    
+    if selected_indicators:
+        st.markdown("##### ⚙️ 針對個別指標設定資料處理方式：")
+        transform_cols = st.columns(min(len(selected_indicators), 3))
+        
+        for idx, ind in enumerate(selected_indicators):
+            col_target = transform_cols[idx % len(transform_cols)]
+            with col_target:
+                current_val = st.session_state.indicator_transforms.get(ind, "原始水準 (Level/Raw)")
+                chosen_transform = st.selectbox(
+                    f"【{ind}】處理方式",
+                    transform_options,
+                    index=transform_options.index(current_val) if current_val in transform_options else 0,
+                    key=f"trans_{ind}"
+                )
+                st.session_state.indicator_transforms[ind] = chosen_transform
+
+    st.markdown("---")
+    col_c1, col_c2 = st.columns([1, 1])
+    with col_c1:
         use_secondary_y = st.checkbox("開啟雙 Y 軸顯示", value=True)
-    with col_s4:
+    with col_c2:
         chart_height = st.slider("圖表高度：", min_value=400, max_value=800, value=500)
 
     if not selected_indicators:
@@ -438,12 +457,14 @@ elif app_mode == "📊 全球總體經濟數據 (Yahoo & FRED)":
             for ind_name in selected_indicators:
                 code_item = st.session_state.custom_indicators.get(ind_name, "")
                 code = code_item if isinstance(code_item, str) else code_item.get("code", "")
+                calc_mode = st.session_state.indicator_transforms.get(ind_name, "原始水準 (Level/Raw)")
                 
                 if code:
                     s_df = fetch_smart_data(code)
                     if not s_df.empty:
                         series = s_df.set_index('Date')[ind_name if ind_name in s_df.columns else s_df.columns[1]]
                         
+                        # 依照該指標各自選擇的處理方式計算
                         if calc_mode == "年增率 (YoY %)":
                             # 智慧頻率偵測與 YoY 計算
                             if len(series) > 1:
@@ -502,7 +523,7 @@ elif app_mode == "📊 全球總體經濟數據 (Yahoo & FRED)":
                     )
 
                 fig.update_layout(
-                    title=f"全球市場與總經數據互動對比圖 ({calc_mode})",
+                    title="全球市場與總經數據互動對比圖（支援多重獨立轉換方式）",
                     hovermode="x unified",
                     legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
                     template="plotly_dark",
