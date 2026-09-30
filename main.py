@@ -26,7 +26,9 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-api_key = st.secrets.get("DASHSCOPE_API_KEY", os.environ.get("DASHSCOPE_API_KEY", ""))
+# 讀取 DashScope 與 FRED 的 API Key
+dashscope_key = st.secrets.get("DASHSCOPE_API_KEY", os.environ.get("DASHSCOPE_API_KEY", ""))
+fred_api_key = st.secrets.get("FRED_API_KEY", os.environ.get("FRED_API_KEY", ""))
 
 st.title("📈 AI 機構級金融市場研報與總經決策系統")
 st.caption("自動彙整實時總經新聞、Yahoo / FRED 雙資料源動態連動圖表、每日研報/月報，以及資產交易決策評估。")
@@ -37,10 +39,15 @@ st.caption("自動彙整實時總經新聞、Yahoo / FRED 雙資料源動態連�
 with st.sidebar:
     st.header("⚙️ 功能選單")
     
-    if api_key:
-        st.success("🔒 API Key 已由系統安全載入")
+    if dashscope_key:
+        st.success("🔒 DashScope API Key 已載入")
     else:
-        st.error("❌ 系統未讀取到 API Key，請至 Streamlit Secrets 設定 DASHSCOPE_API_KEY")
+        st.error("❌ 未讀取到 DASHSCOPE_API_KEY")
+
+    if fred_api_key:
+        st.success("🔒 FRED API Key 已載入")
+    else:
+        st.warning("⚠️ 未讀取到 FRED_API_KEY（總經數據將改用備用管道）")
 
     st.markdown("---")
     app_mode = st.radio(
@@ -49,14 +56,14 @@ with st.sidebar:
     )
 
 # ---------------------------------------------------------
-# 3. 工具函數 (Qwen API & 雙資料源抓取)
+# 3. 工具函數 (Qwen API & FRED API / Yahoo 雙資料源抓取)
 # ---------------------------------------------------------
 def call_qwen_api(messages_list):
-    if not api_key:
+    if not dashscope_key:
         return None, "請先於 Streamlit Secrets 設定 DASHSCOPE_API_KEY！"
         
     client = OpenAI(
-        api_key=api_key.strip(),
+        api_key=dashscope_key.strip(),
         base_url="https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
     )
     models_to_try = ['qwen-max', 'qwen-plus', 'qwen-turbo']
@@ -125,7 +132,7 @@ def search_symbol_by_llm(keyword):
 
 @st.cache_data(ttl=3600)
 def fetch_smart_data(symbol):
-    """強力過濾所有非法字元，確保 FRED 與 Yahoo 抓取 100% 成功"""
+    """結合 FRED 官方 REST API 與 Yahoo Finance 的智慧抓取函數"""
     raw_code = str(symbol).strip().replace("$", "").replace('"', "").replace("'", "")
     
     fred_mapping = {
@@ -136,12 +143,45 @@ def fetch_smart_data(symbol):
     }
     clean_code = fred_mapping.get(raw_code.upper(), raw_code)
 
-    # 1. 優先嘗試 FRED
-    fred_url = f"https://fred.stlouisfed.org/graph/fredgraph.csv?id={clean_code.replace('^', '')}"
+    # 1. 優先嘗試透過 FRED 官方 API 抓取
+    if fred_api_key and not clean_code.startswith("^") and len(clean_code) <= 10:
+        fred_url = (
+            f"https://api.stlouisfed.org/fred/series/observations"
+            f"?series_id={clean_code}&api_key={fred_api_key}&file_type=json"
+        )
+        try:
+            req = urllib.request.Request(
+                fred_url, 
+                headers={'User-Agent': 'Mozilla/5.0'}
+            )
+            with urllib.request.urlopen(req, timeout=8) as response:
+                data = json.loads(response.read().decode('utf-8'))
+                
+            observations = data.get("observations", [])
+            if observations:
+                dates = []
+                values = []
+                for obs in observations:
+                    if obs["value"] != ".":
+                        dates.append(obs["date"])
+                        values.append(float(obs["value"]))
+                
+                df = pd.DataFrame({
+                    'Date': pd.to_datetime(dates),
+                    symbol: values
+                })
+                df = df.dropna().sort_values('Date')
+                if len(df) > 2:
+                    return df
+        except Exception:
+            pass
+
+    # 2. 備用：嘗試 FRED 官方公開 CSV 捷徑（若 API Key 未設定或失敗）
+    fred_csv_url = f"https://fred.stlouisfed.org/graph/fredgraph.csv?id={clean_code.replace('^', '')}"
     try:
         req = urllib.request.Request(
-            fred_url, 
-            headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36'}
+            fred_csv_url, 
+            headers={'User-Agent': 'Mozilla/5.0'}
         )
         with urllib.request.urlopen(req, timeout=8) as response:
             csv_data = response.read()
@@ -157,7 +197,7 @@ def fetch_smart_data(symbol):
     except Exception:
         pass
 
-    # 2. 嘗試 Yahoo Finance (yfinance)
+    # 3. 嘗試 Yahoo Finance (yfinance)
     try:
         ticker = yf.Ticker(clean_code)
         df = ticker.history(period="3y")
@@ -174,7 +214,7 @@ def fetch_smart_data(symbol):
     return pd.DataFrame()
 
 # ---------------------------------------------------------
-# 模組一：每日金融市場要聞 & 歷史查詢 & 月報彙整 (已對齊專業排版格式)
+# 模組一：每日金融市場要聞 & 歷史查詢 & 月報彙整
 # ---------------------------------------------------------
 if app_mode == "📰 每日要聞與總經月報":
     st.header("📰 全球金融市場要聞與總經月報系統")
@@ -231,7 +271,7 @@ if app_mode == "📰 每日要聞與總經月報":
    # 每日金融市場要聞與機構深度研報（{today_dt.strftime('%Y年%m月%d日')}）
 
 2. **引言段落**：
-   簡明扼要點出今日全球金融市場的核心轉折、關鍵利率表現（如 5.00% 關卡）、央行政策預期、股市風險與地緣政治影響。
+   簡明扼要點出今日全球金融市場的核心轉折、關鍵利率表現、央行政策預期、股市風險與地緣政治影響。
 
 3. **四大核心板塊（必須嚴格使用以下標題與條列格式）**：
    - **一、全球金融市場焦點與數據總覽**
@@ -241,8 +281,8 @@ if app_mode == "📰 每日要聞與總經月報":
 
 4. **條列細節規範**：
    - 每個板塊底下包含 3 個條列項目（使用 `*`）。
-   - 每個條列開頭必須採用 **粗體前綴名稱加冒號**（例如：`- **美債殖利率突破 5.00% 警戒線**：內容...`）。
-   - 內文中所有關鍵數字、百分比、企業名稱、重要指標均需**粗體標示**（例如 **5.00%**、**NVIDIA**、**聯準會 (Fed)** 等）。
+   - 每個條列開頭必須採用 **粗體前綴名稱加冒號**。
+   - 內文中所有關鍵數字、百分比、企業名稱、重要指標均需**粗體標示**。
 """
                 with st.spinner("🤖 Qwen 首席分析師正在進行深度研報撰寫與脈絡梳理..."):
                     report_content, err = call_qwen_api([{"role": "user", "content": prompt}])
@@ -317,9 +357,271 @@ if app_mode == "📰 每日要聞與總經月報":
                 )
 
 # ---------------------------------------------------------
-# 模組二與模組三維持原有邏輯 (略，同你原程式碼)
+# 模組二：全球總體經濟數據 (Yahoo & FRED)
 # ---------------------------------------------------------
 elif app_mode == "📊 全球總體經濟數據 (Yahoo & FRED)":
-    st.info("請參考原系統「全球總體經濟數據」模組運作。")
+    st.header("📊 全球總體經濟與市場數據庫 (Yahoo & FRED 智慧雙資料源)")
+    st.caption("自動連線 Yahoo Finance 與 FRED API 資料庫，支援 GDP、CPI、PCE、美債殖利率與股市指數！")
+
+    if "custom_indicators" not in st.session_state:
+        st.session_state.custom_indicators = DEFAULT_INDICATORS.copy()
+
+    if "selected_indicators_list" not in st.session_state:
+        st.session_state.selected_indicators_list = ["美國 10 年期公債殖利率 (%)", "S&P 500 指數"]
+
+    with st.expander("🔍 智慧搜尋數據代碼 / 新增自訂指標", expanded=True):
+        col_sch1, col_sch2 = st.columns([3, 1])
+        with col_sch1:
+            search_query = st.text_input("輸入想尋找的數據名稱（中英文皆可）：", placeholder="例如：US GDP, 美國CPI, 台積電, S&P500, 比特幣, 黃金")
+        with col_sch2:
+            st.write(" ")
+            st.write(" ")
+            do_search = st.button("🔎 搜尋數據代碼", type="primary")
+
+        if do_search and search_query:
+            with st.spinner(f"正在搜尋與 '{search_query}' 最匹配的代碼..."):
+                search_results = search_symbol_by_llm(search_query)
+                if search_results:
+                    st.session_state.search_results = search_results
+
+        if "search_results" in st.session_state and st.session_state.search_results:
+            st.markdown("##### 🎯 匹配到的數據代碼建議：")
+            res_options = {
+                f"{item['name']} (Code: {item['code']} - Source: {item.get('source', 'Auto')})": item 
+                for item in st.session_state.search_results
+            }
+            selected_match_label = st.selectbox("選擇欲加入的數據指標：", list(res_options.keys()))
+            selected_item = res_options[selected_match_label]
+
+            col_add1, col_add2 = st.columns([3, 1])
+            with col_add1:
+                final_name = st.text_input("圖表顯示名稱：", value=selected_item['name'])
+            with col_add2:
+                st.write(" ")
+                st.write(" ")
+                if st.button("➕ 加入指標對比"):
+                    st.session_state.custom_indicators[final_name] = selected_item['code']
+                    if final_name not in st.session_state.selected_indicators_list:
+                        st.session_state.selected_indicators_list.append(final_name)
+                    st.success(f"✅ 成功將【{final_name}】加入圖表對比！")
+                    st.rerun()
+
+    st.markdown("---")
+    col_s1, col_s2, col_s3, col_s4 = st.columns([2, 1, 1, 1])
+    
+    valid_options = list(st.session_state.custom_indicators.keys())
+    st.session_state.selected_indicators_list = [k for k in st.session_state.selected_indicators_list if k in valid_options]
+
+    with col_s1:
+        selected_indicators = st.multiselect(
+            "選擇欲比較的市場/總經指標：",
+            valid_options,
+            default=st.session_state.selected_indicators_list
+        )
+        st.session_state.selected_indicators_list = selected_indicators
+
+    with col_s2:
+        calc_mode = st.selectbox(
+            "數據處理方式：",
+            ["原始水準 (Level/Raw)", "年增率 (YoY %)", "月/日增額 (Diff)"]
+        )
+    with col_s3:
+        use_secondary_y = st.checkbox("開啟雙 Y 軸顯示", value=True)
+    with col_s4:
+        chart_height = st.slider("圖表高度：", min_value=400, max_value=800, value=500)
+
+    if not selected_indicators:
+        st.warning("⚠️ 請至少選擇一項指標進行繪圖與編輯！")
+    else:
+        combined_df = pd.DataFrame()
+        with st.spinner("智慧連線 Yahoo / FRED API 擷取數據中..."):
+            for ind_name in selected_indicators:
+                code_item = st.session_state.custom_indicators.get(ind_name, "")
+                code = code_item if isinstance(code_item, str) else code_item.get("code", "")
+                
+                if code:
+                    s_df = fetch_smart_data(code)
+                    if not s_df.empty:
+                        series = s_df.set_index('Date')[ind_name if ind_name in s_df.columns else s_df.columns[1]]
+                        
+                        if calc_mode == "年增率 (YoY %)":
+                            shift_n = 4 if len(series) < 50 else (12 if len(series) < 300 else 252)
+                            processed = series.pct_change(shift_n) * 100
+                        elif calc_mode == "月/日增額 (Diff)":
+                            processed = series.diff()
+                        else:
+                            processed = series
+                            
+                        res_df = processed.to_frame(name=ind_name).reset_index()
+                        res_df = res_df.dropna().tail(60)
+                        
+                        if combined_df.empty:
+                            combined_df = res_df
+                        else:
+                            combined_df = pd.merge(combined_df, res_df, on='Date', how='outer')
+
+        if not combined_df.empty:
+            combined_df = combined_df.sort_values('Date')
+            combined_df = combined_df.ffill().bfill()
+            
+            combined_df['日期 (YYYY-MM-DD)'] = combined_df['Date'].dt.strftime('%Y-%m-%d')
+            display_cols = ['日期 (YYYY-MM-DD)'] + [c for c in combined_df.columns if c not in ['Date', '日期 (YYYY-MM-DD)']]
+            display_df = combined_df[display_cols].copy()
+
+            st.subheader("✏️ 數據線上編輯器 (修改數值、點擊 ＋ Add row 手動補充最新資料)")
+            edited_df = st.data_editor(display_df, num_rows="dynamic", key="macro_editor")
+
+            if not edited_df.empty:
+                chart_df = edited_df.copy()
+                chart_df['日期 (YYYY-MM-DD)'] = pd.to_datetime(chart_df['日期 (YYYY-MM-DD)'], errors='coerce')
+                chart_df = chart_df.dropna(subset=['日期 (YYYY-MM-DD)']).sort_values('日期 (YYYY-MM-DD)')
+                chart_df.set_index('日期 (YYYY-MM-DD)', inplace=True)
+
+                fig = make_subplots(specs=[[{"secondary_y": True}]])
+                colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', '#8c564b', '#e377c2', '#17becf']
+                
+                value_cols = [c for c in chart_df.columns if c != '日期 (YYYY-MM-DD)']
+                for idx, col in enumerate(value_cols):
+                    is_secondary = (idx > 0 and use_secondary_y)
+                    chart_df[col] = pd.to_numeric(chart_df[col], errors='coerce')
+                    fig.add_trace(
+                        go.Scatter(x=chart_df.index, y=chart_df[col], name=str(col), mode='lines+markers', line=dict(width=2.5, color=colors[idx % len(colors)])),
+                        secondary_y=is_secondary
+                    )
+
+                fig.update_layout(
+                    title=f"全球市場與總經數據互動對比圖 ({calc_mode})",
+                    hovermode="x unified",
+                    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+                    template="plotly_dark",
+                    height=chart_height
+                )
+                fig.update_xaxes(title_text="日期")
+                fig.update_yaxes(title_text="主指標 (Left Axis)", secondary_y=False)
+                if use_secondary_y and len(value_cols) > 1:
+                    fig.update_yaxes(title_text="對比指標 (Right Axis)", secondary_y=True)
+
+                st.subheader("📈 市場趨勢雙 Y 軸動態圖表")
+                st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.error("⚠️ 無法連線讀取數據，請確認指標代碼或網路連線。")
+
+# ---------------------------------------------------------
+# 模組三：基金 / ETF 交易決策評估
+# ---------------------------------------------------------
 elif app_mode == "🎯 基金 / ETF 交易決策評估":
-    st.info("請參考原系統「基金 / ETF 交易決策評估」模組運作。")
+    st.header("🎯 基金 / ETF 投資決策與評估報告生成器")
+    
+    if "fund_report" not in st.session_state:
+        st.session_state.fund_report = None
+    if "fund_prompt_info" not in st.session_state:
+        st.session_state.fund_prompt_info = {}
+
+    col1, col2, col3 = st.columns([2, 1, 1])
+    with col1:
+        fund_name = st.text_input("輸入基金 / ETF / 股票標的", placeholder="例如：1301.TW、0050、IEF ETF、元大美債20年")
+    with col2:
+        action_type = st.selectbox("擬執行交易方向", ["買進 / 建倉 (Buy)", "賣出 / 減碼 (Sell)", "觀望 / 持有 (Hold)"])
+    with col3:
+        lang_choice = st.selectbox("報告語言風格", ["繁體中文 (Traditional Chinese)", "英文 (English)", "中英雙語對照 (Bilingual)"])
+
+    if st.button("🚀 生成個案投資評估報告", type="primary", use_container_width=True):
+        if not fund_name.strip():
+            st.warning("⚠️ 請輸入標的名稱或代碼！")
+        else:
+            with st.spinner(f"正在抓取 {fund_name} 最新資料與基本面..."):
+                encoded_query = urllib.parse.quote(fund_name)
+                rss_url = f"https://news.google.com/rss/search?q={encoded_query}+OR+聯準會+OR+美債殖利率+OR+通膨&hl=zh-TW&gl=TW&ceid=TW:zh-Hant"
+                feed = feedparser.parse(rss_url)
+                
+                news_list = []
+                for entry in feed.entries[:6]:
+                    title = clean_html(entry.get('title', ''))
+                    published = entry.get('published', '')
+                    summary = clean_html(entry.get('summary', ''))[:200]
+                    news_list.append(f"【時間: {published}】\n標題: {title}\n摘要: {summary}\n")
+                
+                market_data = "\n".join(news_list) if news_list else "暫無具體即時新聞，將基於資產常規屬性分析。"
+
+            lang_instruction = "全篇報告請使用「標準繁體中文」。"
+            if lang_choice == "英文 (English)":
+                lang_instruction = "Please write the entire report in Professional English."
+            elif lang_choice == "中英雙語對照 (Bilingual)":
+                lang_instruction = "每個段落請先提供「繁體中文」，隨後附上對應的「英文翻譯 (English Translation)」。"
+
+            prompt = f"""
+你是一位機構級資深基金分析師與首席投資策略官。請針對標的【{fund_name}】，撰寫一份包含**分拆獨立表格基本檔案**與**深度決策評估**的專業機構報告。
+
+【基本交易資訊】：
+- 標的輸入：{fund_name}
+- 擬執行交易方向：{action_type}
+- 語言要求：{lang_instruction}
+
+【即時市場新聞與數據】：
+{market_data}
+
+【撰寫格式與結構規範（請將各資料分拆為獨立 Markdown 表格，絕對不要混在一張表內）】：
+
+### 📌 零、標的基本檔案與配置概況 (Basic Profile)
+
+#### 1. 基金 / ETF 基本資訊
+| 項目 | 內容/數值 |
+| :--- | :--- |
+| **基金/ETF 中文全稱** | (正確中文名稱) |
+| **基金/ETF 英文全稱** | (正確英文全稱) |
+| **交易所 / 股票代碼** | (Ticker / Code) |
+| **追蹤指數 / 標的屬性** | (Benchmark Index / Asset Class) |
+| **基金規模 (AUM)** | (最新預估規模) |
+| **經理費 / 總內扣費用 (TER)**| (Expense Ratio) |
+
+#### 2. 歷史績效表現 (Performance Track Record)
+| 期間 | MTD | YTD | 1M | 3M | 6M | 1Yr | 3Yr (年化) | 5Yr (年化) |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| **總報酬率 (%)** | (數據/估計) | (數據/估計) | (數據/估計) | (數據/估計) | (數據/估計) | (數據/估計) | (數據/估計) | (數據/估計) |
+
+#### 3. 前十大持股 (Top 10 Holdings)
+| 排序 | 持股 / 標的名稱 | 估計權重 (%) |
+| :--- | :--- | :--- |
+| 1 | (持股名稱 1) | (權重 1%) |
+| ... | ... | ... |
+
+#### 4. 主要產業與國家配置分布 (Sectors & Geographic Allocation)
+| 主要產業 (Sectors) | 占比 (%) | 主要國家/地區 (Geographic) | 占比 (%) |
+| :--- | :--- | :--- | :--- |
+| (產業 1) | (%) | (國家 1) | (%) |
+
+#### 5. 關鍵風險與固定收益專屬指標
+| 專屬風險指標 | 內容 / 數值 | 說明 |
+| :--- | :--- | :--- |
+| **修正存續期間 (Modified Duration)** | (例如：6.8 年) | （對利率變動之價格敏感度） |
+| **30 天 SEC 殖利率 / 到期殖利率 (Yield)** | (例如：4.85%) | （最新年化收益率） |
+
+---
+
+### 一、當前總體經濟環境與市場脈絡分析
+### 二、標的屬性與最新市場衝擊評估 ({fund_name})
+### 三、買賣方向 ({action_type}) 可行性評估與風控/停損策略
+"""
+            with st.spinner("🤖 Qwen 分析師正在編製獨立結構表格與撰寫評估報告..."):
+                report, err = call_qwen_api([{"role": "user", "content": prompt}])
+                if report:
+                    st.session_state.fund_report = report
+                    st.session_state.fund_prompt_info = {
+                        "fund_name": fund_name,
+                        "action_type": action_type,
+                        "prompt": prompt
+                    }
+                    st.success("✅ 獨立表格化基本檔案與決策報告生成完畢！")
+                else:
+                    st.error(f"❌ 生成失敗: {err}")
+
+    if st.session_state.fund_report:
+        st.markdown("---")
+        st.subheader(f"📈 《{st.session_state.fund_prompt_info.get('fund_name')}》- 標的表格檔案與決策評估報告")
+        st.markdown(st.session_state.fund_report)
+        
+        st.download_button(
+            "📥 下載完整評估報告 (.txt)",
+            st.session_state.fund_report,
+            file_name=f"{st.session_state.fund_prompt_info.get('fund_name')}_Report.txt"
+        )
