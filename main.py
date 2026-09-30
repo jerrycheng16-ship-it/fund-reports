@@ -318,7 +318,7 @@ if app_mode == "📰 每日要聞與總經月報":
         all_files = glob.glob("daily_reports/*.md")
         available_months = sorted(list(set([os.path.basename(f)[:7] for f in all_files])), reverse=True)
         if not available_months:
-            st.warning("⚠️ 尚無每日研報數據。")
+            st.warning("⚠️️ 尚無每日研報數據。")
         else:
             target_month = st.selectbox("選擇欲彙整的月份：", available_months)
             if st.button("🚀 生成機構級月報", type="primary"):
@@ -445,7 +445,19 @@ elif app_mode == "📊 全球總體經濟數據 (Yahoo & FRED)":
                         series = s_df.set_index('Date')[ind_name if ind_name in s_df.columns else s_df.columns[1]]
                         
                         if calc_mode == "年增率 (YoY %)":
-                            shift_n = 4 if len(series) < 50 else (12 if len(series) < 300 else 252)
+                            # 智慧頻率偵測與 YoY 計算
+                            if len(series) > 1:
+                                dates_idx = pd.Series(series.index)
+                                avg_diff_days = (dates_idx.diff().dt.days).median()
+                                if avg_diff_days > 60 and avg_diff_days <= 120:
+                                    shift_n = 4   # 季資料 (Quarterly) 跨 4 期
+                                elif avg_diff_days > 300:
+                                    shift_n = 1   # 年資料 (Annual) 跨 1 期
+                                else:
+                                    shift_n = 12  # 月資料 (Monthly) 跨 12 期
+                            else:
+                                shift_n = 12
+                            
                             processed = series.pct_change(shift_n) * 100
                         elif calc_mode == "月/日增額 (Diff)":
                             processed = series.diff()
