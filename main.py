@@ -495,7 +495,7 @@ elif app_mode == "📊 全球總體經濟數據 (Yahoo & FRED)":
             for next_df in dfs_to_merge[1:]:
                 combined_df = pd.merge(combined_df, next_df, on='Date', how='outer')
             
-            combined_df = combined_df.sort_values('Date').tail('date')
+            combined_df = combined_df.sort_values('Date')
             combined_df = combined_df.dropna(how='all', subset=selected_indicators)
             
             combined_df['日期 (YYYY-MM-DD)'] = combined_df['Date'].dt.strftime('%Y-%m-%d')
