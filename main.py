@@ -197,7 +197,7 @@ def fetch_smart_data(symbol):
     except Exception:
         pass
 
-    # 3. 嘗試 Yahoo Finance (yfinance) - 強制抓取 max 歷史資料
+    # 3. 嘗試 Yahoo Finance (yfinance) - 使用 period="max" 確保獲取完整歷史
     try:
         ticker = yf.Ticker(clean_code)
         df = ticker.history(period="max", auto_adjust=True)
@@ -314,7 +314,7 @@ if app_mode == "📰 每日要聞與總經月報":
                 st.download_button("📥 下載此研報 (.md)", content, file_name=os.path.basename(selected_file))
 
     with tab3:
-        st.subheader("🗓️ 月度總經趨勢彙整系統")
+        st.subheader("🗓️️ 月度總經趨勢彙整系統")
         all_files = glob.glob("daily_reports/*.md")
         available_months = sorted(list(set([os.path.basename(f)[:7] for f in all_files])), reverse=True)
         if not available_months:
@@ -499,10 +499,7 @@ elif app_mode == "📊 全球總體經濟數據 (Yahoo & FRED)":
                         dfs_to_merge.append(res_df)
 
         if dfs_to_merge:
-            # 【關鍵修復】：先根據選擇的時間區間計算出絕對的起始日期，然後在各自抓取後或合併前過濾，
-            # 確保不會因為某個指標歷史較短而把其他指標的早期歷史整個切掉！
-            
-            # 先找出所有資料中的最新日期作為基準
+            # 先根據選擇的時間區間計算出絕對的起始日期
             all_max_date = max([df['Date'].max() for df in dfs_to_merge])
             
             if time_range == "近 1 年":
@@ -529,6 +526,11 @@ elif app_mode == "📊 全球總體經濟數據 (Yahoo & FRED)":
                 combined_df = pd.merge(combined_df, next_df, on='Date', how='outer')
             
             combined_df = combined_df.sort_values('Date')
+            
+            # 【關鍵修正】：對各個選定指標欄位各自獨立進行前向補值，填平中間因結算日微調產生的 None 斷層
+            for ind in selected_indicators:
+                if ind in combined_df.columns:
+                    combined_df[ind] = combined_df[ind].ffill()
             
             # 轉換顯示格式
             combined_df['日期 (YYYY-MM-DD)'] = combined_df['Date'].dt.strftime('%Y-%m-%d')
@@ -571,7 +573,7 @@ elif app_mode == "📊 全球總體經濟數據 (Yahoo & FRED)":
                 st.subheader("📈 市場趨勢雙 Y 軸動態圖表")
                 st.plotly_chart(fig, use_container_width=True)
         else:
-            st.error("⚠️️ 無法連線讀取數據，請確認指標代碼或網路連線。")
+            st.error("⚠️ 無法連線讀取數據，請確認指標代碼或網路連線。")
 
 # ---------------------------------------------------------
 # 模組三：基金 / ETF 交易決策評估
