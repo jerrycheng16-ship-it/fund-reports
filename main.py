@@ -132,7 +132,7 @@ def search_symbol_by_llm(keyword):
 
 @st.cache_data(ttl=3600)
 def fetch_smart_data(symbol):
-    """結合 FRED 官方 REST API 與 Yahoo Finance 的智慧抓取函數"""
+    """結合 FRED 官方 REST API 與 Yahoo Finance 的智慧抓取函數（支援完整歷史範圍 period="max"）"""
     raw_code = str(symbol).strip().replace("$", "").replace('"', "").replace("'", "")
     
     fred_mapping = {
@@ -197,10 +197,10 @@ def fetch_smart_data(symbol):
     except Exception:
         pass
 
-    # 3. 嘗試 Yahoo Finance (yfinance)
+    # 3. 嘗試 Yahoo Finance (yfinance) - 使用 period="max" 確保獲取完整歷史
     try:
         ticker = yf.Ticker(clean_code)
-        df = ticker.history(period="3y")
+        df = ticker.history(period="max")
         if not df.empty and len(df) > 2:
             df = df.reset_index()
             val_col = 'Close' if 'Close' in df.columns else df.columns[1]
@@ -314,7 +314,7 @@ if app_mode == "📰 每日要聞與總經月報":
                 st.download_button("📥 下載此研報 (.md)", content, file_name=os.path.basename(selected_file))
 
     with tab3:
-        st.subheader("🗓️ 月度總經趨勢彙整系統")
+        st.subheader("🗓️️ 月度總經趨勢彙整系統")
         all_files = glob.glob("daily_reports/*.md")
         available_months = sorted(list(set([os.path.basename(f)[:7] for f in all_files])), reverse=True)
         if not available_months:
@@ -361,7 +361,7 @@ if app_mode == "📰 每日要聞與總經月報":
 # ---------------------------------------------------------
 elif app_mode == "📊 全球總體經濟數據 (Yahoo & FRED)":
     st.header("📊 全球總體經濟與市場數據庫 (Yahoo & FRED 智慧雙資料源)")
-    st.caption("自動連線 Yahoo Finance 與 FRED API 資料庫，並可針對每一個選擇的指標獨立設定資料轉換方式與異質頻率對齊！")
+    st.caption("自動連線 Yahoo Finance 與 FRED API 資料庫，支援獨立資料轉換、異質頻率完美對齊與動態時間區間篩選！")
 
     if "custom_indicators" not in st.session_state:
         st.session_state.custom_indicators = DEFAULT_INDICATORS.copy()
@@ -442,17 +442,25 @@ elif app_mode == "📊 全球總體經濟數據 (Yahoo & FRED)":
                 st.session_state.indicator_transforms[ind] = chosen_transform
 
     st.markdown("---")
-    col_c1, col_c2 = st.columns([1, 1])
-    with col_c1:
+    
+    # 第三步：時間區間與圖表顯示設定
+    col_opt1, col_opt2, col_opt3 = st.columns([2, 1, 1])
+    with col_opt1:
+        time_range = st.selectbox(
+            "📅 選擇檢視的時間區間：",
+            ["近 1 年", "近 3 年", "近 5 年", "近 10 年", "近 15 年", "全部歷史 (Max)"],
+            index=3  # 預設選近 10 年
+        )
+    with col_opt2:
         use_secondary_y = st.checkbox("開啟雙 Y 軸顯示", value=True)
-    with col_c2:
+    with col_opt3:
         chart_height = st.slider("圖表高度：", min_value=400, max_value=800, value=500)
 
     if not selected_indicators:
         st.warning("⚠️ 請至少選擇一項指標進行繪圖與編輯！")
     else:
         dfs_to_merge = []
-        with st.spinner("智慧連線 Yahoo / FRED API 擷取並對齊異質頻率數據中..."):
+        with st.spinner("智慧連線 Yahoo / FRED API 擷取並完整對齊歷史數據中..."):
             for ind_name in selected_indicators:
                 code_item = st.session_state.custom_indicators.get(ind_name, "")
                 code = code_item if isinstance(code_item, str) else code_item.get("code", "")
@@ -496,8 +504,25 @@ elif app_mode == "📊 全球總體經濟數據 (Yahoo & FRED)":
                 combined_df = pd.merge(combined_df, next_df, on='Date', how='outer')
             
             combined_df = combined_df.sort_values('Date')
-            combined_df = combined_df.dropna(how='all', subset=selected_indicators)
+            combined_df[selected_indicators] = combined_df[selected_indicators].ffill().bfill()
             
+            # 根據使用者選擇的時間區間進行過濾
+            latest_date = combined_df['Date'].max()
+            if time_range == "近 1 年":
+                start_date = latest_date - pd.DateOffset(years=1)
+            elif time_range == "近 3 年":
+                start_date = latest_date - pd.DateOffset(years=3)
+            elif time_range == "近 5 年":
+                start_date = latest_date - pd.DateOffset(years=5)
+            elif time_range == "近 10 年":
+                start_date = latest_date - pd.DateOffset(years=10)
+            elif time_range == "近 15 年":
+                start_date = latest_date - pd.DateOffset(years=15)
+            else:
+                start_date = combined_df['Date'].min()
+                
+            combined_df = combined_df[combined_df['Date'] >= start_date]
+
             combined_df['日期 (YYYY-MM-DD)'] = combined_df['Date'].dt.strftime('%Y-%m-%d')
             display_cols = ['日期 (YYYY-MM-DD)'] + [c for c in combined_df.columns if c not in ['Date', '日期 (YYYY-MM-DD)']]
             display_df = combined_df[display_cols].copy()
@@ -524,7 +549,7 @@ elif app_mode == "📊 全球總體經濟數據 (Yahoo & FRED)":
                     )
 
                 fig.update_layout(
-                    title="全球市場與總經數據互動對比圖（異質頻率完美對齊與獨立轉換）",
+                    title=f"全球市場與總經數據互動對比圖 ({time_range})",
                     hovermode="x unified",
                     legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
                     template="plotly_dark",
