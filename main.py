@@ -138,10 +138,9 @@ def save_report_to_github(file_path, content, commit_message):
 
 
 def get_available_reports():
-  """從本地與 GitHub API 同步抓取歷史研報清單，解決雲端環境重新整理看不到的問題"""
+  """從本地與 GitHub API 同步抓取歷史研報清單"""
   os.makedirs("daily_reports", exist_ok=True)
 
-  # 若本地無檔案且有 GitHub 設定，嘗試從 GitHub 同步
   local_files = glob.glob("daily_reports/*.md")
   if not local_files and github_token and github_repo:
     try:
@@ -357,7 +356,7 @@ if app_mode == "📰 每日要聞與總經月報":
               if success:
                 st.success("✅ 深度研報生成完畢，且已自動同步至 GitHub！")
                 time.sleep(1)
-                st.rerun()  # 自動重新整理頁面以更新歷史清單
+                st.rerun()
               else:
                 st.warning(f"⚠️ 本地儲存成功，但 GitHub 同步失敗: {msg}")
             else:
@@ -588,4 +587,157 @@ elif app_mode == "📊 全球總體經濟數據 (Yahoo & FRED)":
       all_max_date = max([df["Date"].max() for df in dfs_to_merge])
       if time_range == "近 1 年":
         start_date = all_max_date - pd.DateOffset(years=1)
-      elif
+      elif time_range == "近 3 年":
+        start_date = all_max_date - pd.DateOffset(years=3)
+      elif time_range == "近 5 年":
+        start_date = all_max_date - pd.DateOffset(years=5)
+      elif time_range == "近 10 年":
+        start_date = all_max_date - pd.DateOffset(years=10)
+      elif time_range == "近 15 年":
+        start_date = all_max_date - pd.DateOffset(years=15)
+      else:
+        start_date = pd.Timestamp.min
+
+      filtered_dfs = [df[df["Date"] >= start_date] for df in dfs_to_merge]
+      combined_df = filtered_dfs[0]
+      for next_df in filtered_dfs[1:]:
+        combined_df = pd.merge(combined_df, next_df, on="Date", how="outer")
+
+      combined_df = combined_df.sort_values("Date")
+      for ind in selected_indicators:
+        if ind in combined_df.columns:
+          combined_df[ind] = combined_df[ind].ffill()
+
+      combined_df["日期 (YYYY-MM-DD)"] = combined_df["Date"].dt.strftime(
+          "%Y-%m-%d"
+      )
+      display_cols = ["日期 (YYYY-MM-DD)"] + [
+          c for c in combined_df.columns if c not in ["Date", "日期 (YYYY-MM-DD)"]
+      ]
+      display_df = combined_df[display_cols].copy()
+
+      st.subheader("✏️ 數據線上編輯器")
+      edited_df = st.data_editor(
+          display_df, num_rows="dynamic", key="macro_editor"
+      )
+
+      if not edited_df.empty:
+        chart_df = edited_df.copy()
+        chart_df["日期 (YYYY-MM-DD)"] = pd.to_datetime(
+            chart_df["日期 (YYYY-MM-DD)"], errors="coerce"
+        )
+        chart_df = chart_df.dropna(subset=["日期 (YYYY-MM-DD)"]).sort_values(
+            "日期 (YYYY-MM-DD)"
+        )
+        chart_df.set_index("日期 (YYYY-MM-DD)", inplace=True)
+
+        fig = make_subplots(specs=[[{"secondary_y": True}]])
+        colors = [
+            "#1f77b4",
+            "#ff7f0e",
+            "#2ca02c",
+            "#d62728",
+            "#9467bd",
+            "#8c564b",
+            "#e377c2",
+            "#17becf",
+        ]
+        value_cols = [c for c in chart_df.columns if c != "日期 (YYYY-MM-DD)"]
+        for idx, col in enumerate(value_cols):
+          is_secondary = idx > 0 and use_secondary_y
+          chart_df[col] = pd.to_numeric(chart_df[col], errors="coerce")
+          fig.add_trace(
+              go.Scatter(
+                  x=chart_df.index,
+                  y=chart_df[col],
+                  name=str(col),
+                  mode="lines+markers",
+                  line=dict(width=2.5, color=colors[idx % len(colors)]),
+                  connectgaps=True,
+              ),
+              secondary_y=is_secondary,
+          )
+
+        fig.update_layout(
+            title=f"全球市場與總經數據互動對比圖 ({time_range})",
+            hovermode="x unified",
+            legend=dict(
+                orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1
+            ),
+            template="plotly_dark",
+            height=chart_height,
+        )
+        st.plotly_chart(fig, use_container_width=True)
+
+# ---------------------------------------------------------
+# 模組三：基金 / ETF 交易決策評估
+# ---------------------------------------------------------
+elif app_mode == "🎯 基金 / ETF 交易決策評估":
+  st.header("🎯 基金 / ETF 投資決策與評估報告生成器")
+
+  if "fund_report" not in st.session_state:
+    st.session_state.fund_report = None
+  if "fund_prompt_info" not in st.session_state:
+    st.session_state.fund_prompt_info = {}
+
+  col1, col2, col3 = st.columns([2, 1, 1])
+  with col1:
+    fund_name = st.text_input(
+        "輸入基金 / ETF / 股票標的", placeholder="例如：1301.TW、0050、IEF ETF"
+    )
+  with col2:
+    action_type = st.selectbox(
+        "擬執行交易方向",
+        ["買進 / 建倉 (Buy)", "賣出 / 減碼 (Sell)", "觀望 / 持有 (Hold)"],
+    )
+  with col3:
+    lang_choice = st.selectbox(
+        "報告語言風格",
+        [
+            "繁體中文 (Traditional Chinese)",
+            "英文 (English)",
+            "中英雙語對照 (Bilingual)",
+        ],
+    )
+
+  if st.button(
+      "🚀 生成個案投資評估報告", type="primary", use_container_width=True
+  ):
+    if not fund_name.strip():
+      st.warning("⚠️ 請輸入標的名稱或代碼！")
+    else:
+      with st.spinner(f"正在抓取 {fund_name} 最新資料與基本面..."):
+        encoded_query = urllib.parse.quote(fund_name)
+        rss_url = f"https://news.google.com/rss/search?q={encoded_query}+OR+聯準會+OR+美債殖利率+OR+通膨&hl=zh-TW&gl=TW&ceid=TW:zh-Hant"
+        feed = feedparser.parse(rss_url)
+
+        news_list = [
+            f"【時間: {entry.get('published', '')}】\n標題: {clean_html(entry.get('title', ''))}\n摘要: {clean_html(entry.get('summary', ''))[:200]}\n"
+            for entry in feed.entries[:6]
+        ]
+        market_data = (
+            "\n".join(news_list) if news_list else "暫無具體即時新聞。"
+        )
+
+      prompt = f"""
+你是一位機構級資深基金分析師與首席投資策略官。請針對標的【{fund_name}】，撰寫一份專業機構報告。
+- 標的輸入：{fund_name}
+- 擬執行交易方向：{action_type}
+"""
+      with st.spinner("🤖 Qwen 分析師正在編製獨立結構表格與撰寫評估報告..."):
+        report, err = call_qwen_api([{"role": "user", "content": prompt}])
+        if report:
+          st.session_state.fund_report = report
+          st.session_state.fund_prompt_info = {"fund_name": fund_name}
+          st.success("✅ 決策報告生成完畢！")
+        else:
+          st.error(f"❌ 生成失敗: {err}")
+
+  if st.session_state.fund_report:
+    st.markdown("---")
+    st.markdown(st.session_state.fund_report)
+    st.download_button(
+        "📥 下載完整評估報告 (.txt)",
+        st.session_state.fund_report,
+        file_name=f"{st.session_state.fund_prompt_info.get('fund_name')}_Report.txt",
+    )
