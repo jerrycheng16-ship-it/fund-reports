@@ -766,3 +766,10 @@ elif app_mode == "🎯 基金 / ETF 交易決策評估":
 """
         with st.spinner("🤖 Qwen 正在進行量化決策推演..."):
           eval_report, err = call_qwen_api(
+              [{"role": "user", "content": eval_prompt}]
+          )
+          if eval_report:
+            st.markdown("---")
+            st.markdown(eval_report)
+          else:
+            st.error(f"❌ 評估生成失敗: {err}")
