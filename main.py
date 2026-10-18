@@ -301,11 +301,11 @@ if app_mode == "📰 每日要聞與總經月報":
   today_str = today_dt.strftime("%Y-%m-%d")
 
   with tab1:
-    st.subheader("📡 即時抓取路透社與 Yahoo 財經新聞摘要並詳細忠實引述")
+    st.subheader("📡 即時抓取路透社與 Yahoo 財經新聞並完整引述詳細數據")
     st.info(f"📅 基準日期（台灣時間）：{today_dt.strftime('%Y 年 %m 月 %d 日')}")
 
-    if st.button("🚀 即時產出今日詳細新聞摘要與引述", type="primary"):
-      with st.spinner("正在擷取路透社與 Yahoo 財經最新新聞..."):
+    if st.button("🚀 即時產出今日詳細新聞內容與數據", type="primary"):
+      with st.spinner("正在完整擷取路透社與 Yahoo 財經最新新聞與數據內容..."):
         rss_urls = [
             "https://news.google.com/rss/search?q=site:cn.reuters.com+OR+site:reuters.com&hl=zh-TW&gl=TW&ceid=TW:zh-Hant",
             "https://news.google.com/rss/search?q=site:tw.stock.yahoo.com+OR+site:finance.yahoo.com+通膨+OR+聯準會+OR+美股+OR+美債+OR+殖利率&hl=zh-TW&gl=TW&ceid=TW:zh-Hant",
@@ -316,12 +316,13 @@ if app_mode == "📰 每日要聞與總經月報":
         for url in rss_urls:
           try:
             feed = feedparser.parse(url)
-            for entry in feed.entries[:12]:
+            for entry in feed.entries[:15]:
               title = clean_html(entry.get("title", ""))
               published = entry.get("published", "")
-              summary = clean_html(entry.get("summary", ""))[:500]
+              # 擴充摘要抓取長度至 1500 字元，確保新聞內的數據、百分比與細節不遺漏
+              summary = clean_html(entry.get("summary", ""))[:1500]
               raw_news.append(
-                  f"【時間: {published}】\n標題: {title}\n摘要: {summary}\n"
+                  f"【時間: {published}】\n標題: {title}\n完整內容摘要: {summary}\n---\n"
               )
           except Exception as e:
             st.warning(f"⚠️ RSS 讀取異常: {e}")
@@ -340,10 +341,11 @@ if app_mode == "📰 每日要聞與總經月報":
 【嚴格指令】：
 1. 請從上述原始資料中挑選出最重要、最具代表性的 **3 則核心市場訊息**。
 2. **絕對禁止自己發揮、揣測、做投資判斷或主觀解讀**。
-3. 內容份量必須充足、詳細，**不得簡單帶過**。每一則訊息請**完全根據上述原始資料內容進行深度、詳盡的引述與說明**，完整重現報導中的背景細節、事件發展、相關機構與數據，確保內容豐富且百分之百忠於原文。
-4. **必須全程使用繁體中文輸出**。
+3. **必須詳細引述數據**：若原始資料中包含任何數字、百分比、跌幅點數、金額、指數或是機構名稱，**必須全部完整保留並詳細列出**，絕對不可簡化或省略。
+4. 每則訊息需包含詳細的背景與內容敘述，確保內容豐富且百分之百忠於原文。
+5. **必須全程使用繁體中文輸出**。
 """
-          with st.spinner("🤖 正在整理與詳細忠實引述新聞內容..."):
+          with st.spinner("🤖 正在詳細整理與忠實引述新聞數據與內容..."):
             report_content, err = call_qwen_api(
                 [{"role": "user", "content": prompt}]
             )
@@ -358,10 +360,10 @@ if app_mode == "📰 每日要聞與總經月報":
               success, msg = save_report_to_github(
                   file_rel_path,
                   report_content,
-                  f"Add detailed quoted news report for {today_str}",
+                  f"Add detailed news report with figures for {today_str}",
               )
               if success:
-                st.success("✅ 詳細新聞內容忠實引述完畢，且已自動同步至 GitHub！")
+                st.success("✅ 詳細新聞與數據引述完畢，且已自動同步至 GitHub！")
                 time.sleep(1)
                 st.rerun()
               else:
@@ -412,11 +414,11 @@ if app_mode == "📰 每日要聞與總經月報":
           date_str = os.path.basename(filepath).replace(".md", "")
           with open(filepath, "r", encoding="utf-8") as f:
             monthly_combined_text += (
-                f"\n\n=== {date_str} 原始紀錄 ===\n" + f.read()[:1500]
+                f"\n\n=== {date_str} 原始紀錄 ===\n" + f.read()[:2000]
             )
 
         monthly_prompt = f"""
-請針對 {target_month} 月份每日新聞紀錄進行詳細彙整，忠實呈現該月份的原始新聞重點與豐富細節。絕對禁止自行發揮、揣測或做投資判斷。必須全程使用繁體中文輸出。
+請針對 {target_month} 月份每日新聞紀錄進行詳細彙整，忠實呈現該月份的原始新聞重點、具體數據與細節。絕對禁止自行發揮、揣測或做投資判斷。必須全程使用繁體中文輸出。
 === 全月資料紀錄 ===
 {monthly_combined_text}
 ===================
@@ -534,4 +536,30 @@ elif app_mode == "📊 全球總體經濟數據 (Yahoo & FRED)":
             ),
             key=f"trans_{ind}",
         )
-        st.session_state.indicator_transforms
+        st.session_state.indicator_transforms[ind] = chosen_transform
+
+  st.markdown("---")
+  col_opt1, col_opt2, col_opt3 = st.columns([2, 1, 1])
+  with col_opt1:
+    time_range = st.selectbox(
+        "📅 選擇檢視的時間區間：",
+        [
+            "近 1 年",
+            "近 3 年",
+            "近 5 年",
+            "近 10 年",
+            "近 15 年",
+            "全部歷史 (Max)",
+        ],
+        index=3,
+    )
+  with col_opt2:
+    use_secondary_y = st.checkbox("開啟雙 Y 軸顯示", value=True)
+  with col_opt3:
+    chart_height = st.slider("圖表高度：", min_value=400, max_value=800, value=500)
+
+  if not selected_indicators:
+    st.warning("⚠️ 請至少選擇一項指標進行繪圖與編輯！")
+  else:
+    dfs_to_merge = []
+    with st.spinner("智慧連線 Yahoo / FRED API 擷取並完整
