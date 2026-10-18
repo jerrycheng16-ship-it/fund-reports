@@ -562,4 +562,140 @@ elif app_mode == "📊 全球總體經濟數據 (Yahoo & FRED)":
     st.warning("⚠️ 請至少選擇一項指標進行繪圖與編輯！")
   else:
     dfs_to_merge = []
-    with st.spinner("智慧連線 Yahoo / FRED API 擷取並完整
+    with st.spinner("智慧連線 Yahoo / FRED API 擷取並完整對齊歷史數據中..."):
+      for ind_name in selected_indicators:
+        code_item = st.session_state.custom_indicators.get(ind_name, "")
+        code = (
+            code_item
+            if isinstance(code_item, str)
+            else code_item.get("code", "")
+        )
+        calc_mode = st.session_state.indicator_transforms.get(
+            ind_name, "原始水準 (Level/Raw)"
+        )
+
+        if code:
+          s_df = fetch_smart_data(code)
+          if not s_df.empty:
+            s_df["Date"] = pd.to_datetime(s_df["Date"])
+            s_df = s_df.sort_values("Date").set_index("Date")
+            series = s_df.iloc[:, 0]
+
+            if calc_mode == "年增率 (YoY %)":
+              processed = series.pct_change(12) * 100
+            elif calc_mode == "月/日增額 (Diff)":
+              processed = series.diff()
+            else:
+              processed = series
+
+            res_series = processed.resample("ME").last().dropna()
+            res_df = res_series.to_frame(name=ind_name).reset_index()
+            dfs_to_merge.append(res_df)
+
+    if dfs_to_merge:
+      all_max_date = max([df["Date"].max() for df in dfs_to_merge])
+      if time_range == "近 1 年":
+        start_date = all_max_date - pd.DateOffset(years=1)
+      elif time_range == "近 3 年":
+        start_date = all_max_date - pd.DateOffset(years=3)
+      elif time_range == "近 5 年":
+        start_date = all_max_date - pd.DateOffset(years=5)
+      elif time_range == "近 10 年":
+        start_date = all_max_date - pd.DateOffset(years=10)
+      elif time_range == "近 15 年":
+        start_date = all_max_date - pd.DateOffset(years=15)
+      else:
+        start_date = pd.to_datetime("1900-01-01")
+
+      merged_df = dfs_to_merge[0]
+      for df in dfs_to_merge[1:]:
+        merged_df = pd.merge(merged_df, df, on="Date", how="outer")
+      merged_df = merged_df.sort_values("Date")
+      merged_df = merged_df[merged_df["Date"] >= start_date]
+
+      fig = make_subplots(specs=[[{"secondary_y": use_secondary_y}]])
+      colors = [
+          "#00d2ff",
+          "#ff9900",
+          "#00ff66",
+          "#ff3366",
+          "#cc66ff",
+          "#ffff33",
+          "#33ffff",
+      ]
+
+      for idx, col_name in enumerate(selected_indicators):
+        if col_name in merged_df.columns:
+          sub_df = merged_df[["Date", col_name]].dropna()
+          is_sec = use_secondary_y and (idx % 2 == 1)
+          fig.add_trace(
+              go.Scatter(
+                  x=sub_df["Date"],
+                  y=sub_df[col_name],
+                  name=col_name,
+                  line=dict(
+                      color=colors[idx % len(colors)],
+                      width=2.5 if idx == 0 else 1.8,
+                  ),
+              ),
+              secondary_y=is_sec,
+          )
+
+      fig.update_layout(
+          title_text="<b>全球總體經濟與金融市場指標動態對比圖</b>",
+          height=chart_height,
+          template="plotly_dark",
+          legend=dict(
+              orientation="h",
+              yanchor="bottom",
+              y=1.02,
+              xanchor="right",
+              x=1,
+          ),
+          margin=dict(l=40, r=40, t=60, b=40),
+      )
+      st.plotly_chart(fig, use_container_width=True)
+
+      with st.expander("📋 檢視與下載合併後的對比數據表格"):
+        st.dataframe(merged_df.set_index("Date").sort_index(ascending=False))
+        csv_data = merged_df.to_csv(index=False).encode("utf-8")
+        st.download_button(
+            "📥 下載篩選後數據 (.csv)",
+            csv_data,
+            file_name="macro_indicators_data.csv",
+            mime="text/csv",
+        )
+
+# ---------------------------------------------------------
+# 模組三：基金 / ETF 交易決策評估
+# ---------------------------------------------------------
+elif app_mode == "🎯 基金 / ETF 交易決策評估":
+  st.header("🎯 機構級基金與 ETF 交易決策評估系統")
+  st.caption("輸入您的投資標的與基本面觀點，結合最新市場數據進行多維度回測與AI決策分析。")
+
+  col_etf1, col_etf2 = st.columns(2)
+  with col_etf1:
+    target_ticker = st.text_input(
+        "輸入欲評估的基金/ETF 代碼 (例如: 0050.TW, SPY, QQQ, TLT):",
+        value="SPY",
+    )
+  with col_etf2:
+    user_view = st.selectbox(
+        "您的總經/操作觀點：",
+        [
+            "看多 (Bullish) - 經濟軟著陸/降息循環",
+            "看空 (Bearish) - 經濟衰退/通膨再起/流動性緊縮",
+            "震盪避險 (Consolidation/Hedging)",
+        ],
+    )
+
+  if st.button("🚀 執行量化回測與 AI 決策評估", type="primary"):
+    with st.spinner(f"正在擷取 {target_ticker} 歷史走勢並評估多維度量化指標..."):
+      df_etf = fetch_smart_data(target_ticker)
+      if df_etf.empty:
+        st.error(
+            f"❌ 無法取得標的【{target_ticker}】的歷史數據，請確認代碼是否正確。"
+        )
+      else:
+        df_etf = df_etf.sort_values("Date")
+        recent_
