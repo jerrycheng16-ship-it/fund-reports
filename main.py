@@ -321,7 +321,7 @@ if app_mode == "📰 每日要聞與總經月報":
   today_str = today_dt.strftime("%Y-%m-%d")
 
   with tab1:
-    st.subheader("📡 即時擷取財經新聞 (每則新聞約 500 字詳細摘要)")
+    st.subheader("📡 即時擷取財經新聞重點摘要 (約 500 字)")
     st.info(f"📅 基準日期（台灣時間）：{today_dt.strftime('%Y 年 %m 月 %d 日')}")
 
     if st.button("🚀 即時產出今日新聞摘要", type="primary"):
@@ -362,9 +362,11 @@ if app_mode == "📰 每日要聞與總經月報":
 
 【嚴格指令】：
 1. 請從上述資料中挑選出最重要、最具代表性的 **3 則核心市場訊息**。
-2. **絕對禁止自己發揮、揣測、添加任何投資建議或主觀解讀**。
-3. **字數與內容要求**：每一則新聞訊息必須詳細摘要其核心事實、背景與原始數據，**單則內容長度必須在 500 字左右**。
-4. 全程使用**繁體中文**輸出。
+2. **絕對禁止前後內容重複或分段冗述**。每則新聞只需提供一個連續、流暢的段落。
+3. **必須明確點出具體指標或機構名稱**：若新聞涉及特定技術指標、經濟數據、指數或機構（例如 S&P 500、CPI、非農就業等），必須在內文中清楚指名道姓，絕對禁止使用模糊代稱（如「某指標」）。
+4. **絕對禁止自己發揮、揣測或添加任何投資建議**。
+5. **字數與內容要求**：每一則新聞訊息的摘要長度必須控制在 **500 字左右**，純粹客觀地還原新聞內的原始事實與數據。
+6. 全程使用**繁體中文**輸出。
 """
           with st.spinner("🤖 正在整理每則約 500 字的純客觀新聞摘要..."):
             report_content, err = call_qwen_api(
@@ -381,7 +383,7 @@ if app_mode == "📰 每日要聞與總經月報":
               success, msg = save_report_to_github(
                   file_rel_path,
                   report_content,
-                  f"Add 500-word per news summary for {today_str}",
+                  f"Add 500-word non-redundant news summary for {today_str}",
               )
               if success:
                 st.success("✅ 新聞摘要生成完畢，且已自動同步至 GitHub！")
@@ -439,7 +441,7 @@ if app_mode == "📰 每日要聞與總經月報":
             )
 
         monthly_prompt = f"""
-請針對 {target_month} 月份每日新聞紀錄進行彙整，忠實呈現原始新聞重點與數據，絕對禁止自行發揮與主觀判斷。全程使用繁體中文。
+請針對 {target_month} 月份每日新聞紀錄進行彙整，總字數控制在 500 字左右，忠實呈現原始新聞重點與數據，絕對禁止自行發揮與主觀判斷。全程使用繁體中文。
 === 全月資料紀錄 ===
 {monthly_combined_text}
 ===================
@@ -718,4 +720,49 @@ elif app_mode == "🎯 基金 / ETF 交易決策評估":
             f"❌ 無法取得標的【{target_ticker}】的歷史數據，請確認代碼是否正確。"
         )
       else:
-        df_etf = df_et
+        df_etf = df_etf.sort_values("Date")
+        recent_price = df_etf.iloc[-1, 1]
+        ma200 = (
+            df_etf.iloc[:, 1].rolling(window=200).mean().iloc[-1]
+            if len(df_etf) >= 200
+            else recent_price
+        )
+        ma50 = (
+            df_etf.iloc[:, 1].rolling(window=50).mean().iloc[-1]
+            if len(df_etf) >= 50
+            else recent_price
+        )
+        ret_1y = (
+            (recent_price / df_etf.iloc[-252, 1] - 1) * 100
+            if len(df_etf) >= 252
+            else 0
+        )
+
+        st.success(
+            f"✅ 數據擷取成功！當前價格: **{recent_price:.2f}** | 50日均線: **{ma50:.2f}** | 200日均線: **{ma200:.2f}** | 近1年報酬率: **{ret_1y:.2f}%**"
+        )
+
+        eval_prompt = f"""
+你是一位頂尖的華爾街量化基金經理人與風險管理委員會主席。
+投資人準備評估的標的為：{target_ticker}
+當前價格：{recent_price:.2f}
+50日均線：{ma50:.2f}
+200日均線：{ma200:.2f}
+近1年報酬率：{ret_1y:.2f}%
+投資人當前總經觀點：{user_view}
+
+請提供一份《機構級基金/ETF 交易決策與風險評估報告》，包含：
+1. **技術面與趨勢結構判定**
+2. **總經與觀點契合度分析**
+3. **具體執行建議（建議配置比例、進場策略、停損停利點位）**
+4. **潛在風險警示**
+"""
+        with st.spinner("🤖 Qwen 正在進行量化決策推演..."):
+          eval_report, err = call_qwen_api(
+              [{"role": "user", "content": eval_prompt}]
+          )
+          if eval_report:
+            st.markdown("---")
+            st.markdown(eval_report)
+          else:
+            st.error(f"❌ 評估生成失敗: {err}")
