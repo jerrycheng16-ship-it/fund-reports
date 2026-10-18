@@ -46,7 +46,7 @@ github_repo = st.secrets.get(
 
 st.title("📈 AI 機構級金融市場研報與總經決策系統")
 st.caption(
-    "自動聯網抓取實時總經新聞全文、Yahoo / FRED 雙資料源動態連動圖表、每日研報/月報，以及資產交易決策評估（支援 GitHub 自動備份）。"
+    "自動聯網抓取實時總經新聞摘要、Yahoo / FRED 雙資料源動態連動圖表、每日研報/月報，以及資產交易決策評估（支援 GitHub 自動備份）。"
 )
 
 # ---------------------------------------------------------
@@ -110,7 +110,6 @@ def call_qwen_api(messages_list):
 
 
 def fetch_article_text(url):
-  """自動連線至新聞網址抓取正文文字，若受阻則回傳空字串"""
   try:
     req = urllib.request.Request(
         url,
@@ -123,19 +122,16 @@ def fetch_article_text(url):
     with urllib.request.urlopen(req, timeout=5) as resp:
       html = resp.read().decode("utf-8", errors="ignore")
       soup = BeautifulSoup(html, "html.parser")
-      # 移除不需要的標籤
       for script in soup(["script", "style", "nav", "footer", "header"]):
         script.extract()
-      # 擷取所有段落文字
       paragraphs = soup.find_all("p")
       text = " ".join([p.get_text() for p in paragraphs])
-      return text[:2000]  # 限制長度避免超出 Token 限制
+      return text[:1500]
   except Exception:
     return ""
 
 
 def save_report_to_github(file_path, content, commit_message):
-  """將生成的研報自動上傳/更新至 GitHub 倉庫"""
   if not github_token or not github_repo:
     return False, "未設定 GITHUB_TOKEN 或 GITHUB_REPO"
 
@@ -325,11 +321,11 @@ if app_mode == "📰 每日要聞與總經月報":
   today_str = today_dt.strftime("%Y-%m-%d")
 
   with tab1:
-    st.subheader("📡 自動聯網抓取財經新聞全文並產出詳細深度報告")
+    st.subheader("📡 即時擷取財經新聞並忠實摘要核心內容")
     st.info(f"📅 基準日期（台灣時間）：{today_dt.strftime('%Y 年 %m 月 %d 日')}")
 
-    if st.button("🚀 即時聯網抓取並產出詳細新聞報告", type="primary"):
-      with st.spinner("正在聯網搜尋並深度抓取各財經新聞網頁全文與數據..."):
+    if st.button("🚀 即時產出今日新聞摘要", type="primary"):
+      with st.spinner("正在聯網擷取財經新聞內容..."):
         rss_urls = [
             "https://news.google.com/rss/search?q=site:cn.reuters.com+OR+site:reuters.com+美股+OR+聯準會+OR+通膨&hl=zh-TW&gl=TW&ceid=TW:zh-Hant",
             "https://news.google.com/rss/search?q=site:tw.stock.yahoo.com+OR+site:finance.yahoo.com+美股+OR+台股+OR+債市+OR+通膨&hl=zh-TW&gl=TW&ceid=TW:zh-Hant",
@@ -343,14 +339,12 @@ if app_mode == "📰 每日要聞與總經月報":
               title = clean_html(entry.get("title", ""))
               published = entry.get("published", "")
               link = entry.get("link", "")
-              
-              # 實際連線抓取網頁內文
               article_body = fetch_article_text(link)
               if not article_body:
                 article_body = clean_html(entry.get("summary", ""))
 
               raw_news.append(
-                  f"【新聞標題】: {title}\n【發布時間】: {published}\n【文章內文與數據】: {article_body}\n---\n"
+                  f"【標題】: {title}\n【時間】: {published}\n【內容】: {article_body}\n---\n"
               )
           except Exception as e:
             st.warning(f"⚠️ 抓取異常: {e}")
@@ -361,21 +355,17 @@ if app_mode == "📰 每日要聞與總經月報":
           prompt = f"""
 今天是 {today_dt.strftime('%Y 年 %m 月 %d 日')}。
 
-以下是今日從聯網擷取的即時新聞與內文資料：
-=== 新聞內文資料 ===
+以下是今日從各大財經媒體擷取的即時新聞資料：
+=== 新聞資料 ===
 {"".join(raw_news)}
-====================
+================
 
-【嚴格指令與排版要求】：
+【嚴格指令】：
 1. 請從上述資料中挑選出最重要、最具代表性的 **3 則核心市場訊息**。
-2. **內容必須極度豐富、詳盡，絕對禁止簡短或敷衍**。每一則訊息必須獨立成為一個完整的專業深度段落，字數須在 400 字以上，並包含以下四個子標題進行深度展開：
-   - **【事件標題與來源】**：完整呈現新聞標題與發布時間。
-   - **【核心事件脈絡與背景說明】**：詳細拆解該事件發生的起因、前因後果與相關產業背景。
-   - **【關鍵數據與細節還原】**：深入列出並解釋內文中提到的所有數字、歷史對照、百分比、點數或關鍵機構。
-   - **【市場連鎖反應與後續觀察重點】**：詳細說明該事件對全球股市、債市、匯市或投資人心理產生的實質影響。
-3. 全程必須使用**繁體中文**撰寫，且必須完全基於上述提供的內文資料進行忠實引述，絕對不可憑空捏造。
+2. **絕對禁止自己發揮、揣測或做任何投資主觀解讀**。
+3. 內容請直接**精簡摘要**新聞內文與原始數據，格式保持俐落、不冗長，並全程使用**繁體中文**輸出。
 """
-          with st.spinner("🤖 正在結合網頁內文與數據進行深度彙整..."):
+          with st.spinner("🤖 正在精簡摘要新聞內容..."):
             report_content, err = call_qwen_api(
                 [{"role": "user", "content": prompt}]
             )
@@ -390,10 +380,10 @@ if app_mode == "📰 每日要聞與總經月報":
               success, msg = save_report_to_github(
                   file_rel_path,
                   report_content,
-                  f"Add web-scraped detailed news report for {today_str}",
+                  f"Add concise news summary for {today_str}",
               )
               if success:
-                st.success("✅ 聯網詳細新聞報告生成完畢，且已自動同步至 GitHub！")
+                st.success("✅ 新聞摘要生成完畢，且已自動同步至 GitHub！")
                 time.sleep(1)
                 st.rerun()
               else:
@@ -448,18 +438,18 @@ if app_mode == "📰 每日要聞與總經月報":
             )
 
         monthly_prompt = f"""
-請針對 {target_month} 月份每日新聞紀錄進行詳細彙整，忠實呈現該月份的原始新聞重點、具體數據與細節。絕對禁止自行發揮、揣測或做投資判斷。必須全程使用繁體中文輸出。
+請針對 {target_month} 月份每日新聞紀錄進行精簡摘要彙整，忠實呈現原始新聞重點與數據，絕對禁止自行發揮與主觀判斷。全程使用繁體中文。
 === 全月資料紀錄 ===
 {monthly_combined_text}
 ===================
 """
-        with st.spinner("🤖 正進行月度新聞詳細彙整..."):
+        with st.spinner("🤖 正進行月度新聞精簡彙整..."):
           monthly_report, err = call_qwen_api(
               [{"role": "user", "content": monthly_prompt}]
           )
           if monthly_report:
             st.session_state[f"monthly_{target_month}"] = monthly_report
-            st.success("✅ 月報詳細彙整成功！")
+            st.success("✅ 月報彙整成功！")
           else:
             st.error(f"❌ 生成失敗: {err}")
 
@@ -566,210 +556,4 @@ elif app_mode == "📊 全球總體經濟數據 (Yahoo & FRED)":
             ),
             key=f"trans_{ind}",
         )
-        st.session_state.indicator_transforms[ind] = chosen_transform
-
-  st.markdown("---")
-  col_opt1, col_opt2, col_opt3 = st.columns([2, 1, 1])
-  with col_opt1:
-    time_range = st.selectbox(
-        "📅 選擇檢視的時間區間：",
-        [
-            "近 1 年",
-            "近 3 年",
-            "近 5 年",
-            "近 10 年",
-            "近 15 年",
-            "全部歷史 (Max)",
-        ],
-        index=3,
-    )
-  with col_opt2:
-    use_secondary_y = st.checkbox("開啟雙 Y 軸顯示", value=True)
-  with col_opt3:
-    chart_height = st.slider("圖表高度：", min_value=400, max_value=800, value=500)
-
-  if not selected_indicators:
-    st.warning("⚠️ 請至少選擇一項指標進行繪圖與編輯！")
-  else:
-    dfs_to_merge = []
-    with st.spinner("智慧連線 Yahoo / FRED API 擷取並完整對齊歷史數據中..."):
-      for ind_name in selected_indicators:
-        code_item = st.session_state.custom_indicators.get(ind_name, "")
-        code = (
-            code_item
-            if isinstance(code_item, str)
-            else code_item.get("code", "")
-        )
-        calc_mode = st.session_state.indicator_transforms.get(
-            ind_name, "原始水準 (Level/Raw)"
-        )
-
-        if code:
-          s_df = fetch_smart_data(code)
-          if not s_df.empty:
-            s_df["Date"] = pd.to_datetime(s_df["Date"])
-            s_df = s_df.sort_values("Date").set_index("Date")
-            series = s_df.iloc[:, 0]
-
-            if calc_mode == "年增率 (YoY %)":
-              processed = series.pct_change(12) * 100
-            elif calc_mode == "月/日增額 (Diff)":
-              processed = series.diff()
-            else:
-              processed = series
-
-            res_series = processed.resample("ME").last().dropna()
-            res_df = res_series.to_frame(name=ind_name).reset_index()
-            dfs_to_merge.append(res_df)
-
-    if dfs_to_merge:
-      all_max_date = max([df["Date"].max() for df in dfs_to_merge])
-      if time_range == "近 1 年":
-        start_date = all_max_date - pd.DateOffset(years=1)
-      elif time_range == "近 3 年":
-        start_date = all_max_date - pd.DateOffset(years=3)
-      elif time_range == "近 5 年":
-        start_date = all_max_date - pd.DateOffset(years=5)
-      elif time_range == "近 10 年":
-        start_date = all_max_date - pd.DateOffset(years=10)
-      elif time_range == "近 15 年":
-        start_date = all_max_date - pd.DateOffset(years=15)
-      else:
-        start_date = pd.to_datetime("1900-01-01")
-
-      merged_df = dfs_to_merge[0]
-      for df in dfs_to_merge[1:]:
-        merged_df = pd.merge(merged_df, df, on="Date", how="outer")
-      merged_df = merged_df.sort_values("Date")
-      merged_df = merged_df[merged_df["Date"] >= start_date]
-
-      fig = make_subplots(specs=[[{"secondary_y": use_secondary_y}]])
-      colors = [
-          "#00d2ff",
-          "#ff9900",
-          "#00ff66",
-          "#ff3366",
-          "#cc66ff",
-          "#ffff33",
-          "#33ffff",
-      ]
-
-      for idx, col_name in enumerate(selected_indicators):
-        if col_name in merged_df.columns:
-          sub_df = merged_df[["Date", col_name]].dropna()
-          is_sec = use_secondary_y and (idx % 2 == 1)
-          fig.add_trace(
-              go.Scatter(
-                  x=sub_df["Date"],
-                  y=sub_df[col_name],
-                  name=col_name,
-                  line=dict(
-                      color=colors[idx % len(colors)],
-                      width=2.5 if idx == 0 else 1.8,
-                  ),
-              ),
-              secondary_y=is_sec,
-          )
-
-      fig.update_layout(
-          title_text="<b>全球總體經濟與金融市場指標動態對比圖</b>",
-          height=chart_height,
-          template="plotly_dark",
-          legend=dict(
-              orientation="h",
-              yanchor="bottom",
-              y=1.02,
-              xanchor="right",
-              x=1,
-          ),
-          margin=dict(l=40, r=40, t=60, b=40),
-      )
-      st.plotly_chart(fig, use_container_width=True)
-
-      with st.expander("📋 檢視與下載合併後的對比數據表格"):
-        st.dataframe(merged_df.set_index("Date").sort_index(ascending=False))
-        csv_data = merged_df.to_csv(index=False).encode("utf-8")
-        st.download_button(
-            "📥 下載篩選後數據 (.csv)",
-            csv_data,
-            file_name="macro_indicators_data.csv",
-            mime="text/csv",
-        )
-
-# ---------------------------------------------------------
-# 模組三：基金 / ETF 交易決策評估
-# ---------------------------------------------------------
-elif app_mode == "🎯 基金 / ETF 交易決策評估":
-  st.header("🎯 機構級基金與 ETF 交易決策評估系統")
-  st.caption("輸入您的投資標的與基本面觀點，結合最新市場數據進行多維度回測與AI決策分析。")
-
-  col_etf1, col_etf2 = st.columns(2)
-  with col_etf1:
-    target_ticker = st.text_input(
-        "輸入欲評估的基金/ETF 代碼 (例如: 0050.TW, SPY, QQQ, TLT):",
-        value="SPY",
-    )
-  with col_etf2:
-    user_view = st.selectbox(
-        "您的總經/操作觀點：",
-        [
-            "看多 (Bullish) - 經濟軟著陸/降息循環",
-            "看空 (Bearish) - 經濟衰退/通膨再起/流動性緊縮",
-            "震盪避險 (Consolidation/Hedging)",
-        ],
-    )
-
-  if st.button("🚀 執行量化回測與 AI 決策評估", type="primary"):
-    with st.spinner(f"正在擷取 {target_ticker} 歷史走勢並評估多維度量化指標..."):
-      df_etf = fetch_smart_data(target_ticker)
-      if df_etf.empty:
-        st.error(
-            f"❌ 無法取得標的【{target_ticker}】的歷史數據，請確認代碼是否正確。"
-        )
-      else:
-        df_etf = df_etf.sort_values("Date")
-        recent_price = df_etf.iloc[-1, 1]
-        ma200 = (
-            df_etf.iloc[:, 1].rolling(window=200).mean().iloc[-1]
-            if len(df_etf) >= 200
-            else recent_price
-        )
-        ma50 = (
-            df_etf.iloc[:, 1].rolling(window=50).mean().iloc[-1]
-            if len(df_etf) >= 50
-            else recent_price
-        )
-        ret_1y = (
-            (recent_price / df_etf.iloc[-252, 1] - 1) * 100
-            if len(df_etf) >= 252
-            else 0
-        )
-
-        st.success(
-            f"✅ 數據擷取成功！當前價格: **{recent_price:.2f}** | 50日均線: **{ma50:.2f}** | 200日均線: **{ma200:.2f}** | 近1年報酬率: **{ret_1y:.2f}%**"
-        )
-
-        eval_prompt = f"""
-你是一位頂尖的華爾街量化基金經理人與風險管理委員會主席。
-投資人準備評估的標的為：{target_ticker}
-當前價格：{recent_price:.2f}
-50日均線：{ma50:.2f}
-200日均線：{ma200:.2f}
-近1年報酬率：{ret_1y:.2f}%
-投資人當前總經觀點：{user_view}
-
-請提供一份《機構級基金/ETF 交易決策與風險評估報告》，包含：
-1. **技術面與趨勢結構判定**
-2. **總經與觀點契合度分析**
-3. **具體執行建議（建議配置比例、進場策略、停損停利點位）**
-4. **潛在風險警示**
-"""
-        with st.spinner("🤖 Qwen 正在進行量化決策推演..."):
-          eval_report, err = call_qwen_api(
-              [{"role": "user", "content": eval_prompt}]
-          )
-          if eval_report:
-            st.markdown("---")
-            st.markdown(eval_report)
-          else:
-            st.error(f"❌ 評估生成失敗: {err}")
+        st.session_state.indicator_transforms[ind] = chosen_
