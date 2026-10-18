@@ -187,4 +187,351 @@ DEFAULT_INDICATORS = {
     "美國 實質 GDP (Real GDP)": "GDPC1",
     "美國 CPI 消費者物價指數": "CPIAUCSL",
     "黃金期貨 (Gold)": "GC=F",
-    "原油期貨 (
+    "原油期貨 (WTI Crude)": "CL=F",
+    "美元指數 (DXY)": "DX-Y.NYB",
+    "VIX 恐慌指數": "^VIX",
+    "台灣加權指數": "^TWII",
+}
+
+
+def search_symbol_by_llm(keyword):
+  prompt = f"""
+你是一個精通全球金融市場（Yahoo Finance 與 FRED 數據庫）的總經專家。
+使用者輸入的自然語言關鍵字為："{keyword}"
+
+請提供 3 個最精準的資料代碼。嚴格以 JSON 陣列格式輸出：
+[
+  {{"code": "GDPC1", "name": "US Real GDP", "source": "FRED"}},
+  {{"code": "^TNX", "name": "US 10-Year Treasury Yield", "source": "Yahoo"}},
+  {{"code": "PCEPILFE", "name": "US Core PCE Index", "source": "FRED"}}
+]
+"""
+  res, err = call_qwen_api([{"role": "user", "content": prompt}])
+  if res:
+    try:
+      match = re.search(r"\[.*\]", res, re.DOTALL)
+      if match:
+        return json.loads(match.group(0))
+    except Exception:
+      return []
+  return []
+
+
+@st.cache_data(ttl=3600)
+def fetch_smart_data(symbol):
+  raw_code = (
+      str(symbol).strip().replace("$", "").replace('"', "").replace("'", "")
+  )
+  fred_mapping = {
+      "GDP": "GDPC1",
+      "CPI": "CPIAUCSL",
+      "PCE": "PCEPILFE",
+      "UNRATE": "UNRATE",
+  }
+  clean_code = fred_mapping.get(raw_code.upper(), raw_code)
+
+  if fred_api_key and not clean_code.startswith("^") and len(clean_code) <= 10:
+    fred_url = f"https://api.stlouisfed.org/fred/series/observations?series_id={clean_code}&api_key={fred_api_key}&file_type=json"
+    try:
+      req = urllib.request.Request(
+          fred_url, headers={"User-Agent": "Mozilla/5.0"}
+      )
+      with urllib.request.urlopen(req, timeout=8) as response:
+        data = json.loads(response.read().decode("utf-8"))
+      observations = data.get("observations", [])
+      if observations:
+        dates = [obs["date"] for obs in observations if obs["value"] != "."]
+        values = [
+            float(obs["value"]) for obs in observations if obs["value"] != "."
+        ]
+        df = pd.DataFrame({"Date": pd.to_datetime(dates), symbol: values})
+        df = df.dropna().sort_values("Date")
+        if len(df) > 2:
+          return df
+    except Exception:
+      pass
+
+  fred_csv_url = (
+      f"https://fred.stlouisfed.org/graph/fredgraph.csv?id={clean_code.replace('^', '')}"
+  )
+  try:
+    req = urllib.request.Request(
+        fred_csv_url, headers={"User-Agent": "Mozilla/5.0"}
+    )
+    with urllib.request.urlopen(req, timeout=8) as response:
+      df = pd.read_csv(io.BytesIO(response.read()))
+    if not df.empty and "DATE" in df.columns:
+      df["Date"] = pd.to_datetime(df["DATE"], errors="coerce")
+      val_col = [c for c in df.columns if c != "DATE"][0]
+      df[symbol] = pd.to_numeric(df[val_col], errors="coerce")
+      df = df[["Date", symbol]].dropna().sort_values("Date")
+      if len(df) > 2:
+        return df
+  except Exception:
+    pass
+
+  try:
+    ticker = yf.Ticker(clean_code)
+    df = ticker.history(period="max", auto_adjust=True)
+    if not df.empty and len(df) > 2:
+      df = df.reset_index()
+      val_col = "Close" if "Close" in df.columns else df.columns[1]
+      df["Date"] = pd.to_datetime(df["Date"]).dt.tz_localize(None)
+      df[symbol] = pd.to_numeric(df[val_col], errors="coerce")
+      df = df[["Date", symbol]].dropna().sort_values("Date")
+      return df
+  except Exception:
+    pass
+
+  return pd.DataFrame()
+
+
+# ---------------------------------------------------------
+# 模組一：每日金融市場要聞 & 歷史查詢 & 月報彙整
+# ---------------------------------------------------------
+if app_mode == "📰 每日要聞與總經月報":
+  st.header("📰 全球金融市場要聞與總經月報系統")
+
+  tab1, tab2, tab3 = st.tabs(
+      ["🚀 即時生成今日要聞", "📅 瀏覽歷史每日研報", "🗓️ 自動彙整總經月報"]
+  )
+
+  tz_taiwan = timezone(timedelta(hours=8))
+  today_dt = datetime.datetime.now(tz_taiwan)
+  today_str = today_dt.strftime("%Y-%m-%d")
+
+  with tab1:
+    st.subheader("📡 即時抓取路透社與 Yahoo 財經新聞摘要並詳細忠實引述")
+    st.info(f"📅 基準日期（台灣時間）：{today_dt.strftime('%Y 年 %m 月 %d 日')}")
+
+    if st.button("🚀 即時產出今日詳細新聞摘要與引述", type="primary"):
+      with st.spinner("正在擷取路透社與 Yahoo 財經最新新聞..."):
+        rss_urls = [
+            "https://news.google.com/rss/search?q=site:cn.reuters.com+OR+site:reuters.com&hl=zh-TW&gl=TW&ceid=TW:zh-Hant",
+            "https://news.google.com/rss/search?q=site:tw.stock.yahoo.com+OR+site:finance.yahoo.com+通膨+OR+聯準會+OR+美股+OR+美債+OR+殖利率&hl=zh-TW&gl=TW&ceid=TW:zh-Hant",
+            "https://news.google.com/rss/search?q=site:reuters.com+OR+site:finance.yahoo.com+Fed+OR+Yield+OR+CPI&hl=zh-TW&gl=TW&ceid=TW:zh-Hant",
+        ]
+
+        raw_news = []
+        for url in rss_urls:
+          try:
+            feed = feedparser.parse(url)
+            for entry in feed.entries[:12]:
+              title = clean_html(entry.get("title", ""))
+              published = entry.get("published", "")
+              summary = clean_html(entry.get("summary", ""))[:500]
+              raw_news.append(
+                  f"【時間: {published}】\n標題: {title}\n摘要: {summary}\n"
+              )
+          except Exception as e:
+            st.warning(f"⚠️ RSS 讀取異常: {e}")
+
+        if not raw_news:
+          st.error("❌ 無法讀取新聞資料，請稍後再試。")
+        else:
+          prompt = f"""
+今天是 {today_dt.strftime('%Y 年 %m 月 %d 日')}。
+
+以下是今日從「路透社」與「Yahoo 財經」擷取的最新即時新聞原始資料：
+=== 今日新聞原始資料 ===
+{"".join(raw_news)}
+========================
+
+【嚴格指令】：
+1. 請從上述原始資料中挑選出最重要、最具代表性的 **3 則核心市場訊息**。
+2. **絕對禁止自己發揮、揣測、做投資判斷或主觀解讀**。
+3. 內容份量必須充足、詳細，**不得簡單帶過**。每一則訊息請**完全根據上述原始資料內容進行深度、詳盡的引述與說明**，完整重現報導中的背景細節、事件發展、相關機構與數據，確保內容豐富且百分之百忠於原文。
+4. **必須全程使用繁體中文輸出**。
+"""
+          with st.spinner("🤖 正在整理與詳細忠實引述新聞內容..."):
+            report_content, err = call_qwen_api(
+                [{"role": "user", "content": prompt}]
+            )
+            if report_content:
+              st.session_state.today_report = report_content
+
+              os.makedirs("daily_reports", exist_ok=True)
+              file_rel_path = f"daily_reports/{today_str}.md"
+              with open(file_rel_path, "w", encoding="utf-8") as f:
+                f.write(report_content)
+
+              success, msg = save_report_to_github(
+                  file_rel_path,
+                  report_content,
+                  f"Add detailed quoted news report for {today_str}",
+              )
+              if success:
+                st.success("✅ 詳細新聞內容忠實引述完畢，且已自動同步至 GitHub！")
+                time.sleep(1)
+                st.rerun()
+              else:
+                st.warning(f"⚠️ 本地儲存成功，但 GitHub 同步失敗: {msg}")
+            else:
+              st.error(f"❌ 生成失敗: {err}")
+
+    if "today_report" in st.session_state:
+      st.markdown("---")
+      st.markdown(st.session_state.today_report)
+
+  with tab2:
+    st.subheader("📅 歷史每日研報查詢")
+    report_files = get_available_reports()
+    if not report_files:
+      st.info("💡 目前資料夾中尚無歷史研報檔。")
+    else:
+      selected_file = st.selectbox(
+          "選擇欲檢視的日期：",
+          report_files,
+          format_func=lambda x: os.path.basename(x).replace(".md", ""),
+      )
+      if selected_file:
+        with open(selected_file, "r", encoding="utf-8") as f:
+          content = f.read()
+        st.markdown("---")
+        st.markdown(content)
+        st.download_button(
+            "📥 下載此研報 (.md)",
+            content,
+            file_name=os.path.basename(selected_file),
+        )
+
+  with tab3:
+    st.subheader("🗓 月度總經趨勢彙整系統")
+    all_files = get_available_reports()
+    available_months = sorted(
+        list(set([os.path.basename(f)[:7] for f in all_files])), reverse=True
+    )
+    if not available_months:
+      st.warning("⚠️ 尚無每日研報數據。")
+    else:
+      target_month = st.selectbox("選擇欲彙整的月份：", available_months)
+      if st.button("🚀 生成月度新聞彙整", type="primary"):
+        month_files = sorted(glob.glob(f"daily_reports/{target_month}-*.md"))
+        monthly_combined_text = ""
+        for filepath in month_files:
+          date_str = os.path.basename(filepath).replace(".md", "")
+          with open(filepath, "r", encoding="utf-8") as f:
+            monthly_combined_text += (
+                f"\n\n=== {date_str} 原始紀錄 ===\n" + f.read()[:1500]
+            )
+
+        monthly_prompt = f"""
+請針對 {target_month} 月份每日新聞紀錄進行詳細彙整，忠實呈現該月份的原始新聞重點與豐富細節。絕對禁止自行發揮、揣測或做投資判斷。必須全程使用繁體中文輸出。
+=== 全月資料紀錄 ===
+{monthly_combined_text}
+===================
+"""
+        with st.spinner("🤖 正進行月度新聞詳細彙整..."):
+          monthly_report, err = call_qwen_api(
+              [{"role": "user", "content": monthly_prompt}]
+          )
+          if monthly_report:
+            st.session_state[f"monthly_{target_month}"] = monthly_report
+            st.success("✅ 月報詳細彙整成功！")
+          else:
+            st.error(f"❌ 生成失敗: {err}")
+
+      if f"monthly_{target_month}" in st.session_state:
+        st.markdown("---")
+        st.markdown(st.session_state[f"monthly_{target_month}"])
+        st.download_button(
+            "📥 下載月度彙整 (.md)",
+            st.session_state[f"monthly_{target_month}"],
+            file_name=f"Monthly_Report_{target_month}.md",
+        )
+
+# ---------------------------------------------------------
+# 模組二：全球總體經濟數據 (Yahoo & FRED)
+# ---------------------------------------------------------
+elif app_mode == "📊 全球總體經濟數據 (Yahoo & FRED)":
+  st.header("📊 全球總體經濟與市場數據庫 (Yahoo & FRED 智慧雙資料源)")
+
+  if "custom_indicators" not in st.session_state:
+    st.session_state.custom_indicators = DEFAULT_INDICATORS.copy()
+  if "selected_indicators_list" not in st.session_state:
+    st.session_state.selected_indicators_list = [
+        "美國 10 年期公債殖利率 (%)",
+        "S&P 500 指數",
+    ]
+  if "indicator_transforms" not in st.session_state:
+    st.session_state.indicator_transforms = {}
+
+  with st.expander("🔍 智慧搜尋數據代碼 / 新增自訂指標", expanded=True):
+    col_sch1, col_sch2 = st.columns([3, 1])
+    with col_sch1:
+      search_query = st.text_input("輸入想尋找的數據名稱（中英文皆可）：")
+    with col_sch2:
+      st.write(" ")
+      st.write(" ")
+      do_search = st.button("🔎 搜尋數據代碼", type="primary")
+
+    if do_search and search_query:
+      with st.spinner(f"正在搜尋與 '{search_query}' 最匹配的代碼..."):
+        search_results = search_symbol_by_llm(search_query)
+        if search_results:
+          st.session_state.search_results = search_results
+
+    if "search_results" in st.session_state and st.session_state.search_results:
+      res_options = {
+          f"{item['name']} (Code: {item['code']} - Source: {item.get('source', 'Auto')})": item
+          for item in st.session_state.search_results
+      }
+      selected_match_label = st.selectbox(
+          "選擇欲加入的數據指標：", list(res_options.keys())
+      )
+      selected_item = res_options[selected_match_label]
+
+      col_add1, col_add2 = st.columns([3, 1])
+      with col_add1:
+        final_name = st.text_input(
+            "圖表顯示名稱：", value=selected_item["name"]
+        )
+      with col_add2:
+        st.write(" ")
+        st.write(" ")
+        if st.button("➕ 加入指標對比"):
+          st.session_state.custom_indicators[final_name] = selected_item["code"]
+          if (
+              final_name
+              not in st.session_state.selected_indicators_list
+          ):
+            st.session_state.selected_indicators_list.append(final_name)
+          st.success(f"✅ 成功將【{final_name}】加入圖表對比！")
+          st.rerun()
+
+  st.markdown("---")
+  valid_options = list(st.session_state.custom_indicators.keys())
+  st.session_state.selected_indicators_list = [
+      k
+      for k in st.session_state.selected_indicators_list
+      if k in valid_options
+  ]
+
+  selected_indicators = st.multiselect(
+      "選擇欲比較的市場/總經指標：",
+      valid_options,
+      default=st.session_state.selected_indicators_list,
+  )
+  st.session_state.selected_indicators_list = selected_indicators
+
+  transform_options = ["原始水準 (Level/Raw)", "年增率 (YoY %)", "月/日增額 (Diff)"]
+  if selected_indicators:
+    st.markdown("##### ⚙️ 針對個別指標設定資料處理方式：")
+    transform_cols = st.columns(min(len(selected_indicators), 3))
+    for idx, ind in enumerate(selected_indicators):
+      col_target = transform_cols[idx % len(transform_cols)]
+      with col_target:
+        current_val = st.session_state.indicator_transforms.get(
+            ind, "原始水準 (Level/Raw)"
+        )
+        chosen_transform = st.selectbox(
+            f"【{ind}】處理方式",
+            transform_options,
+            index=(
+                transform_options.index(current_val)
+                if current_val in transform_options
+                else 0
+            ),
+            key=f"trans_{ind}",
+        )
+        st.session_state.indicator_transforms
